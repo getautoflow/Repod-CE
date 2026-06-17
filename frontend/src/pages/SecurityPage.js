@@ -543,7 +543,11 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                 selectedAction?.color || "bg-blue-600 hover:bg-blue-700"
               }`}
             >
-              {submitting ? "Enregistrement..." : selectedAction ? `${selectedAction.icon} ${selectedAction.label}` : "Confirmer"}
+              {submitting
+                ? "Enregistrement..."
+                : selectedAction
+                  ? <>{selectedAction.icon} {selectedAction.label}</>
+                  : "Confirmer"}
             </button>
           </div>
         </div>
