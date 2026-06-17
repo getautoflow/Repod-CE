@@ -214,7 +214,7 @@ DEFAULT_SOURCES = [
     {
         "id": "debian-bookworm-updates",
         "label": "Debian 12 Updates",
-        "url": "https://deb.debian.org/debian/dists/bookworm-updates/main/binary-amd64/Packages.gz",
+        "url": "https://deb.debian.org/debian/dists/bookworm-updates/main/binary-amd64/Packages.xz",
         "distro": "bookworm-updates",
         "component": "main",
         "arch": "amd64",
