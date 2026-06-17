@@ -368,7 +368,7 @@ def _fetch_metadata_url(repomd_url: str, metadata_type: str = "primary") -> str 
             if data.get("type") == metadata_type:
                 loc = data.find("r:location", ns)
                 if loc is not None:
-                    href = loc.get("href", "")
+                    href = loc.get("href", "").lstrip("/")
                     base = repomd_url.rsplit("/repodata/", 1)[0]
                     return f"{base}/{href}"
     except Exception:
@@ -429,7 +429,6 @@ def _parse_package_elem(pkg, ns_common: str, ns_rpm: str) -> dict | None:
         for el in requires_els
         if el.get("name")
         and not el.get("name", "").startswith("rpmlib(")
-        and not el.get("name", "").startswith("/")
     )
 
     provides_els = pkg.findall("p:format/rpm:provides/rpm:entry", ns)

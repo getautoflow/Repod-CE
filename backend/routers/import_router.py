@@ -229,6 +229,7 @@ def start_sync_target(
     response: Response,
     target: str,
     current_user: str = Depends(get_maintainer_user),
+    _leader: None = Depends(require_leader),
 ):
     """
     Démarre la synchronisation d'un groupe ou d'une source spécifique.

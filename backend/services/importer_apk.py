@@ -5,8 +5,8 @@ les valide via le pipeline complet, et les ajoute au repo interne.
 """
 import os
 import shutil
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Generator
 
@@ -24,7 +24,7 @@ def _get_package_info_apk(pkg_name: str, distro: str | None = None):
     Cherche un paquet APK dans l'index SQLite.
     Si distro est fourni (ex: 'alpine3.21'), filtre sur cette distro en priorité.
     """
-    from services.package_index_apk import get_package_info, DEFAULT_SOURCES
+    from services.package_index_apk import DEFAULT_SOURCES, get_package_info
 
     if distro:
         matching = [s for s in DEFAULT_SOURCES if s.get("distro") == distro]
@@ -147,11 +147,12 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
        "name": str, "version": str | None, "message": str, "steps": list[dict]}
     """
     import tempfile
-    from services.validator import run_validation_pipeline
-    from services.manifest import generate_manifest, save_manifest
-    from services.indexer import add_to_index
+
     from services.audit import log as audit_log
     from services.distributions_apk import add_package as apk_add_package
+    from services.indexer import add_to_index
+    from services.manifest import generate_manifest, save_manifest
+    from services.validator import run_validation_pipeline
 
     pkg_name = pkg_row["name"]
     version = pkg_row.get("version")
@@ -257,7 +258,15 @@ def import_package_stream(
                 skipped += 1
                 continue
 
-            pkg_row = index_get_info(pkg_name, source_id=None) or {"name": pkg_name}
+            pkg_row = index_get_info(pkg_name, source_id=None)
+            if not pkg_row:
+                yield _emit(
+                    f"  [WARN] {pkg_name} — absent de l'index prive"
+                    " (fourni par le repo systeme de la cible)",
+                    "warning",
+                )
+                not_indexed += 1
+                continue
             result = import_one(pkg_row, distribution, user, group=group)
 
             for vs in result.get("steps", []):

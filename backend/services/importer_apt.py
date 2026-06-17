@@ -7,8 +7,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Generator
 
@@ -39,7 +39,8 @@ def _download_deb(pkg_name: str, tmp_dir: str) -> tuple[Path | None, str, str | 
     Télécharge un .deb depuis l'index SQLite local.
     Retourne (chemin_fichier, source_label, sha256_attendu) ou (None, message_erreur, None).
     """
-    from services.package_index import get_package_info as index_get_info, DEFAULT_SOURCES
+    from services.package_index import DEFAULT_SOURCES
+    from services.package_index import get_package_info as index_get_info
 
     row = index_get_info(pkg_name)
     if not row or not row.get("filename"):
@@ -72,8 +73,8 @@ def resolve_deps_online(package_name: str) -> dict:
     """
     Résout les dépendances d'un paquet depuis l'index SQLite.
     """
-    from services.package_index import get_package_info as index_get_info
     from services.indexer import get_package_info as repo_get_info
+    from services.package_index import get_package_info as index_get_info
 
     row = index_get_info(package_name)
     if not row:
@@ -140,10 +141,10 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
       {"status": "added"|"pending_review"|"blocked"|"skipped"|"error",
        "name": str, "version": str | None, "message": str, "steps": list[dict]}
     """
-    from services.validator import run_validation_pipeline
-    from services.manifest import generate_manifest, save_manifest
-    from services.indexer import add_to_index
     from services.audit import log as audit_log
+    from services.indexer import add_to_index
+    from services.manifest import generate_manifest, save_manifest
+    from services.validator import run_validation_pipeline
 
     pkg_name = pkg_row["name"]
     version = pkg_row.get("version")
@@ -207,15 +208,18 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
             ["sh", ADD_DEB_SCRIPT, distribution, dest.name],
             capture_output=True, text=True
         )
-        audit_log("IMPORT", user, "SUCCESS",
-                  package=manifest["name"], version=manifest["version"],
-                  detail=f"importé depuis internet, sha256={manifest['integrity']['sha256']}")
         if add_result.returncode != 0:
             stderr_out = (add_result.stderr or add_result.stdout or "").strip()[:300]
+            audit_log("IMPORT", user, "WARNING",
+                      package=manifest["name"], version=manifest["version"],
+                      detail=f"indexé mais reprepro rc={add_result.returncode}: {stderr_out}")
             return {"status": "added", "name": manifest["name"], "version": manifest["version"],
                     "message": f"indexé mais non publié dans APT (reprepro rc={add_result.returncode}) : {stderr_out}",
                     "steps": validation.steps, "warning": True}
 
+        audit_log("IMPORT", user, "SUCCESS",
+                  package=manifest["name"], version=manifest["version"],
+                  detail=f"importé depuis internet, sha256={manifest['integrity']['sha256']}")
         return {"status": "added", "name": manifest["name"], "version": manifest["version"],
                 "message": "ajouté au repo", "steps": validation.steps}
 
@@ -231,8 +235,8 @@ def import_package_stream(package_name: str, user: str, group: str | None = None
     Télécharge un paquet et ses dépendances, les valide et les ajoute au repo.
     Génère des messages de log en temps réel (Server-Sent Events).
     """
-    from services.package_index import get_package_info as index_get_info
     from services.distributions import detect_distribution_from_source
+    from services.package_index import get_package_info as index_get_info
 
     def emit(msg: str, level: str = "info") -> str:
         return f"data: {level}|{msg}\n\n"

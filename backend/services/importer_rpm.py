@@ -11,8 +11,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Generator
 
@@ -39,7 +39,8 @@ def _download_rpm(pkg_name: str, tmp_dir: str) -> tuple[Path | None, str, str | 
     # Importer DIRECTEMENT depuis package_index_rpm (pas le dispatcher combiné)
     # En mode REPO_FORMAT=all, le dispatcher cherche APT en premier → renvoie un résultat
     # DEB sans champ rpm_url, causant une fausse erreur "introuvable".
-    from services.package_index_rpm import get_package_info as _rpm_get_info, DEFAULT_SOURCES
+    from services.package_index_rpm import DEFAULT_SOURCES
+    from services.package_index_rpm import get_package_info as _rpm_get_info
 
     row = _rpm_get_info(pkg_name)
     if not row or not row.get("rpm_url"):
@@ -73,8 +74,8 @@ def resolve_deps_online(package_name: str, **_kwargs) -> dict:
     """Résout les dépendances d'un paquet RPM depuis l'index SQLite."""
     # Utiliser directement package_index_rpm pour éviter que le dispatcher
     # "all" retourne un résultat APT/APK en premier
-    from services.package_index_rpm import get_package_info as _rpm_get_info
     from services.indexer import get_package_info as repo_get_info
+    from services.package_index_rpm import get_package_info as _rpm_get_info
 
     row = _rpm_get_info(package_name)
     if not row:
@@ -121,10 +122,10 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
     Les entrées "added" incluent en plus : arch, sha256, source, createrepo_ok,
     filename, size_bytes (utilisés par import_package() pour record_import_group).
     """
-    from services.validator import run_validation_pipeline
-    from services.manifest import generate_manifest, save_manifest
-    from services.indexer import add_to_index
     from services.audit import log as audit_log
+    from services.indexer import add_to_index
+    from services.manifest import generate_manifest, save_manifest
+    from services.validator import run_validation_pipeline
 
     pkg_name = pkg_row["name"]
     version = pkg_row.get("version")
@@ -158,7 +159,7 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
         manifest = generate_manifest(
             str(pool_path),
             imported_by=user,
-            import_method="import",
+            import_method="internet",
             validated_deps=validation.deps or None,
             validation_steps=validation.steps,
             cve_results=validation.cve_results or None,
@@ -246,8 +247,9 @@ def import_package(
             })
 
     if group_files:
-        from services.package_index import record_import_group
         import time
+
+        from services.package_index import record_import_group
         group_name = f"{package_name}-{int(time.time())}"
         record_import_group(
             name=group_name,
