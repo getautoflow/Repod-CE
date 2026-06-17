@@ -284,6 +284,11 @@ def _auto_init_apt(log) -> bool:
         for d in ("dists", "db", "pool"):
             (reprepro_base / d).mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "GNUPGHOME": gnupg_home}
+        # Supprimer les entrées orphelines avant d'exporter
+        subprocess.run(
+            ["reprepro", "-b", str(reprepro_base), "clearvanished"],
+            capture_output=True, text=True, env=env,
+        )
         # N'initialiser que les distributions APT (pas les RPM ni APK)
         apt_dists = [d for d in ENTERPRISE_DISTRIBUTIONS if d.get("format", "deb") == "deb"]
         ok_count = 0
@@ -398,6 +403,13 @@ def _init_apt(current_user: str) -> dict:
         (reprepro_base / d).mkdir(parents=True, exist_ok=True)
 
     env = {**os.environ, "GNUPGHOME": gnupg_home}
+
+    # Supprimer les entrées orphelines avant d'exporter (évite "unused database" errors)
+    subprocess.run(
+        ["reprepro", "-b", str(reprepro_base), "clearvanished"],
+        capture_output=True, text=True, env=env,
+    )
+
     results = []
     # N'initialiser que les distributions APT (pas RPM ni APK qui ne passent pas par reprepro)
     for dist in _APT_ONLY_DISTS:
