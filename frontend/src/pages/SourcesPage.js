@@ -458,12 +458,13 @@ function SyncTab() {
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-400 uppercase tracking-wider">Statut global</p>
           <p className="text-xl font-bold mt-0.5">
-            {sources.length > 0 && sources.every((s) => s.status === "ok")
-              ? <span className="text-green-600">OK</span>
-              : sources.some((s) => s.status === "ok")
-              ? <span className="text-yellow-600">Partiel</span>
-              : <span className="text-gray-400">—</span>
-            }
+            {(() => {
+              const synced = sources.filter((s) => s.status && s.status !== "never");
+              if (synced.length === 0) return <span className="text-gray-400">—</span>;
+              if (synced.every((s) => s.status === "ok")) return <span className="text-green-600">OK</span>;
+              if (synced.some((s) => s.status === "ok")) return <span className="text-yellow-600">Partiel</span>;
+              return <span className="text-red-600">Erreur</span>;
+            })()}
           </p>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-3">

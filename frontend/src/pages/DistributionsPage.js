@@ -456,7 +456,7 @@ export default function DistributionsPage() {
       if (fails === 0) {
         toast.success(`${ok}/${total} distributions initialisées`);
       } else {
-        toast.success(`${ok}/${total} initialisées (${fails} ignorées — format non applicable)`);
+        toast.success(`${ok}/${total} initialisées (${fails} en erreur — voir les détails ci-dessous)`);
       }
       load();
     } catch (err) {

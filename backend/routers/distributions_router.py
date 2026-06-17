@@ -9,17 +9,29 @@ Routes pour la gestion des distributions reprepro enterprise.
 import json
 import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth.dependencies import get_current_user, get_admin_user, get_uploader_user, get_maintainer_user
-from services.format_router import is_apt as _is_apt, is_rpm as _is_rpm, is_apk as _is_apk, REPO_FORMAT as _REPO_FORMAT
-from services.distributions import (
-    ENTERPRISE_DISTRIBUTIONS, VALID_CODENAMES,
-    get_distribution_stats, list_packages_in_distrib,
-    promote_package, migrate_all,
+from auth.dependencies import (
+    get_admin_user,
+    get_current_user,
+    get_maintainer_user,
+    get_uploader_user,
 )
 from services.audit import log as audit_log
+from services.distributions import (
+    ENTERPRISE_DISTRIBUTIONS,
+    VALID_CODENAMES,
+    get_distribution_stats,
+    list_packages_in_distrib,
+    migrate_all,
+    promote_package,
+)
+from services.format_router import REPO_FORMAT as _REPO_FORMAT
+from services.format_router import is_apk as _is_apk
+from services.format_router import is_apt as _is_apt
+from services.format_router import is_rpm as _is_rpm
 
 router = APIRouter(prefix="/distributions", tags=["Distributions"])
 
@@ -367,6 +379,8 @@ def _init_apt(current_user: str) -> dict:
     """Initialisation reprepro (mode APT)."""
     import subprocess
 
+    from services.distributions_apt import ENTERPRISE_DISTRIBUTIONS as _APT_ONLY_DISTS
+
     reprepro_base = Path(os.getenv("REPREPRO_BASE", "/repos"))
     conf_dir      = Path(os.getenv("CONF_DIR",      "/repos/conf"))
     gnupg_home    = os.getenv("GNUPG_HOME",          "/repos/gnupg")
@@ -385,7 +399,8 @@ def _init_apt(current_user: str) -> dict:
 
     env = {**os.environ, "GNUPGHOME": gnupg_home}
     results = []
-    for dist in ENTERPRISE_DISTRIBUTIONS:
+    # N'initialiser que les distributions APT (pas RPM ni APK qui ne passent pas par reprepro)
+    for dist in _APT_ONLY_DISTS:
         proc = subprocess.run(
             ["reprepro", "-b", str(reprepro_base), "export", dist["codename"]],
             capture_output=True, text=True, env=env,
@@ -401,7 +416,7 @@ def _init_apt(current_user: str) -> dict:
     n_ok = sum(r["ok"] for r in results)
     audit_log("INIT_DISTS", current_user,
               "SUCCESS" if n_ok == len(results) else "PARTIAL",
-              detail=f"Init reprepro : {n_ok}/{len(results)} distributions OK")
+              detail=f"Init reprepro : {n_ok}/{len(results)} distributions APT OK")
     return {"repo_format": "apt", "results": results}
 
 
