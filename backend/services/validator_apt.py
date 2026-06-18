@@ -277,6 +277,16 @@ def validate_clamav(deb_path: str, result: ValidationResult):
         result.add_step("antivirus", True, "ClamAV — scan incomplet (avertissement)", detail)
 
 
+def _extract_description(match: dict) -> str:
+    vuln = match.get("vulnerability", {})
+    if vuln.get("description"):
+        return vuln["description"]
+    for related in match.get("relatedVulnerabilities", []):
+        if related.get("description"):
+            return related["description"]
+    return ""
+
+
 def validate_cve_grype(
     deb_path: str,
     result: ValidationResult,
@@ -318,7 +328,7 @@ def validate_cve_grype(
             cmd,
             capture_output=True, text=True,
             timeout=300,
-            env={**os.environ, "GRYPE_DB_CACHE_DIR": grype_db_dir},
+            env={**os.environ, "GRYPE_DB_CACHE_DIR": grype_db_dir, "GRYPE_DB_AUTO_UPDATE": "false"},
         )
     except subprocess.TimeoutExpired:
         result.add_step("cve", True, "Grype — timeout (> 5 min), scan CVE ignoré")
@@ -359,7 +369,7 @@ def validate_cve_grype(
             "id":              vuln.get("id", ""),
             "severity":        sev,
             "cvss":            _extract_cvss(vuln),
-            "description":     vuln.get("description", ""),
+            "description":     _extract_description(match),
             "package_name":    artifact.get("name", ""),
             "package_version": artifact.get("version", ""),
             "package_type":    artifact.get("type", ""),

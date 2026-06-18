@@ -689,16 +689,27 @@ def _log_sync(source_id: str, status: str, pkg_count: int, error: str | None,
 
 # ─── Recherche dans l'index ───────────────────────────────────────────────────
 
-def get_package_info(name: str, source_id: str = None) -> dict | None:
-    """Cherche un paquet par nom exact dans l'index local."""
+def get_package_info(name: str, source_id: str = None, source_prefix: str = None) -> dict | None:
+    """Cherche un paquet par nom exact dans l'index local.
+
+    source_prefix : si fourni, filtre les sources dont l'ID commence par ce préfixe
+    (ex. "almalinux9" → cherche dans almalinux9-baseos, almalinux9-appstream, etc.).
+    Utile pour cibler la bonne distribution sans connaître le nom complet de la source.
+    """
     with db_conn() as conn:
         row = conn.execute(text("""
             SELECT * FROM packages
             WHERE name = :name
             AND (:source_id IS NULL OR source_id = :source_id)
+            AND (:source_prefix IS NULL OR source_id LIKE :source_prefix_like)
             ORDER BY CASE WHEN arch = 'x86_64' THEN 0 ELSE 1 END, synced_at DESC
             LIMIT 1
-        """), {"name": name, "source_id": source_id}).mappings().fetchone()
+        """), {
+            "name": name,
+            "source_id": source_id,
+            "source_prefix": source_prefix,
+            "source_prefix_like": f"{source_prefix}%" if source_prefix else None,
+        }).mappings().fetchone()
     return {**dict(row), "format": "rpm"} if row else None
 
 

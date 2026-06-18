@@ -31,10 +31,15 @@ def _get_repo_base_url(repomd_url: str) -> str:
     return repomd_url.rsplit("/repodata/", 1)[0]
 
 
-def _download_rpm(pkg_name: str, tmp_dir: str) -> tuple[Path | None, str, str | None]:
+def _download_rpm(pkg_name: str, tmp_dir: str, distribution: str = "") -> tuple[Path | None, str, str | None]:
     """
     Télécharge un .rpm depuis l'index SQLite local.
     Retourne (chemin_fichier, source_label, sha256_attendu) ou (None, message_erreur, None).
+
+    distribution : si fourni (ex. "almalinux9"), cherche d'abord dans les sources
+    correspondantes (almalinux9-baseos, almalinux9-appstream…) avant de se rabattre
+    sur toutes les sources. Evite de retourner un package Tumbleweed incompatible
+    quand un package natif EL9 existe.
     """
     # Importer DIRECTEMENT depuis package_index_rpm (pas le dispatcher combiné)
     # En mode REPO_FORMAT=all, le dispatcher cherche APT en premier → renvoie un résultat
@@ -42,7 +47,15 @@ def _download_rpm(pkg_name: str, tmp_dir: str) -> tuple[Path | None, str, str | 
     from services.package_index_rpm import DEFAULT_SOURCES
     from services.package_index_rpm import get_package_info as _rpm_get_info
 
-    row = _rpm_get_info(pkg_name)
+    # 1. Essayer d'abord la source native de la distribution cible
+    row = None
+    if distribution:
+        row = _rpm_get_info(pkg_name, source_prefix=distribution)
+
+    # 2. Fallback : n'importe quelle source
+    if not row:
+        row = _rpm_get_info(pkg_name)
+
     if not row or not row.get("rpm_url"):
         return None, f"'{pkg_name}' introuvable dans l'index — lancez une synchronisation", None
 
@@ -130,8 +143,17 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
     pkg_name = pkg_row["name"]
     version = pkg_row.get("version")
 
+    # Skip si un .rpm de même nom est déjà dans les manifests (évite un rescan ClamAV/Grype).
+    # Ne pas skipper si seul un .deb existe — APT et RPM sont des formats distincts.
+    from services.indexer import get_package_info as repo_get_info
+    existing = repo_get_info(pkg_name)
+    if existing and (existing.get("filename", "").endswith(".rpm") or
+                     existing.get("format") == "rpm"):
+        return {"status": "skipped", "name": pkg_name, "version": version,
+                "message": "Déjà dans le repo", "steps": []}
+
     with tempfile.TemporaryDirectory() as tmp_dir:
-        rpm_path, source_label, expected_sha256 = _download_rpm(pkg_name, tmp_dir)
+        rpm_path, source_label, expected_sha256 = _download_rpm(pkg_name, tmp_dir, distribution=distribution)
         if rpm_path is None:
             # Distinguer "absent de l'index" (skip) vs "erreur de téléchargement" (error)
             if "introuvable dans l'index" in source_label:

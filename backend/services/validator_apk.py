@@ -174,7 +174,7 @@ def validate_cve_grype(
             cmd,
             capture_output=True, text=True,
             timeout=300,
-            env={**os.environ, "GRYPE_DB_CACHE_DIR": grype_db_dir},
+            env={**os.environ, "GRYPE_DB_CACHE_DIR": grype_db_dir, "GRYPE_DB_AUTO_UPDATE": "false"},
         )
     except subprocess.TimeoutExpired:
         result.add_step("cve", True, "Grype — timeout (> 5 min), scan CVE ignoré")

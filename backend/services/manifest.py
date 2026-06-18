@@ -337,7 +337,18 @@ def generate_manifest(
             pkg_path, imported_by, import_method,
             validated_deps, import_group, validation_steps, cve_results, dist,
         )
-    if pkg_path.endswith(".rpm") or _is_rpm():
+    if pkg_path.endswith(".deb"):
+        return _generate_deb_manifest(
+            pkg_path, imported_by, import_method,
+            validated_deps, import_group, validation_steps, cve_results, dist,
+        )
+    if pkg_path.endswith(".rpm"):
+        return _generate_rpm_manifest(
+            pkg_path, imported_by, import_method,
+            validated_deps, import_group, validation_steps, cve_results, dist,
+        )
+    # Extension inconnue : se rabattre sur le format singleton (REPO_FORMAT)
+    if _is_rpm():
         return _generate_rpm_manifest(
             pkg_path, imported_by, import_method,
             validated_deps, import_group, validation_steps, cve_results, dist,

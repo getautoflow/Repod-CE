@@ -33,6 +33,7 @@ if _REPO_FORMAT == "all":
         get_sync_status as _apt_get_sync_status,
         search_packages as _apt_search,
         get_package_info as _apt_get_info,
+        get_package_info_for_distro as _apt_get_info_for_distro,
         is_indexed as _apt_is_indexed,
         init_db as _apt_init_db,
         list_packages_by_source as _apt_list_by_source,
@@ -99,6 +100,10 @@ if _REPO_FORMAT == "all":
         """Cherche dans APT puis RPM puis APK."""
         return _apt_get_info(name) or _rpm_get_info(name) or _apk_get_info(name)
 
+    def get_package_info_for_distro(name: str, distro: str | None) -> dict | None:  # noqa: E302
+        """Cherche dans APT (avec filtre distro) puis RPM puis APK."""
+        return _apt_get_info_for_distro(name, distro) or _rpm_get_info(name) or _apk_get_info(name)
+
     def is_indexed() -> bool:                                         # noqa: E302
         """Vrai si au moins un des trois index contient des paquets."""
         return _apt_is_indexed() or _rpm_is_indexed() or _apk_is_indexed()
@@ -126,6 +131,7 @@ elif _REPO_FORMAT == "both":
         get_sync_status as _apt_get_sync_status,
         search_packages as _apt_search,
         get_package_info as _apt_get_info,
+        get_package_info_for_distro as _apt_get_info_for_distro,
         is_indexed as _apt_is_indexed,
         init_db as _apt_init_db,
         list_packages_by_source as _apt_list_by_source,
@@ -178,6 +184,10 @@ elif _REPO_FORMAT == "both":
         """Cherche dans APT puis RPM."""
         return _apt_get_info(name) or _rpm_get_info(name)
 
+    def get_package_info_for_distro(name: str, distro: str | None) -> dict | None:  # noqa: E302
+        """Cherche dans APT (avec filtre distro) puis RPM."""
+        return _apt_get_info_for_distro(name, distro) or _rpm_get_info(name)
+
     def is_indexed() -> bool:                                         # noqa: E302
         """Vrai si au moins un des deux index contient des paquets."""
         return _apt_is_indexed() or _rpm_is_indexed()
@@ -206,6 +216,10 @@ elif _is_apk() and not _is_rpm():
         init_db,
         list_packages_by_source,
     )
+
+    def get_package_info_for_distro(name: str, distro: str | None) -> dict | None:
+        """En mode APK, alias de get_package_info()."""
+        return get_package_info(name)
 
     def get_sync_stats() -> list[dict]:
         return get_sync_status()
@@ -242,6 +256,10 @@ elif _is_rpm():
         list_packages_by_source,
     )
 
+    def get_package_info_for_distro(name: str, distro: str | None) -> dict | None:
+        """En mode RPM, alias de get_package_info() avec source_prefix."""
+        return get_package_info(name, source_prefix=distro)
+
 # ─── Mode APT (défaut) ────────────────────────────────────────────────────────
 else:
     from services.package_index_apt import (
@@ -251,6 +269,7 @@ else:
         get_sync_status,
         search_packages,
         get_package_info,
+        get_package_info_for_distro,
         is_indexed,
         init_db,
         list_packages_by_source,

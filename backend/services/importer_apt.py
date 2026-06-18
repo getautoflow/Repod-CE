@@ -149,9 +149,11 @@ def import_one(pkg_row: dict, distribution: str, user: str, group: str | None = 
     pkg_name = pkg_row["name"]
     version = pkg_row.get("version")
 
-    # Skip si déjà présent dans le pool hiérarchique reprepro
+    # Skip uniquement si CETTE VERSION précise est déjà présente dans le pool
+    # hiérarchique reprepro (une version plus ancienne ne doit pas bloquer la
+    # mise à jour vers le correctif).
     pool_hier = POOL_DIR / "main"
-    if pool_hier.exists() and list(pool_hier.rglob(f"{pkg_name}_*.deb")):
+    if pool_hier.exists() and version and list(pool_hier.rglob(f"{pkg_name}_{version}_*.deb")):
         return {"status": "skipped", "name": pkg_name, "version": version,
                 "message": "déjà présent dans le repo", "steps": []}
 

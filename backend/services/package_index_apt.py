@@ -529,6 +529,27 @@ def get_package_info(name: str, source_id: str = None) -> dict | None:
     return {**dict(row), "format": "deb"} if row else None
 
 
+def get_package_info_for_distro(name: str, distro: str | None) -> dict | None:
+    """
+    Comme get_package_info(), mais privilégie la distribution `distro`
+    (ex: "jammy") : parmi toutes les sources indexées pour cette distro
+    (main, universe, security, ...), retourne la première correspondance.
+    Fallback sur get_package_info(name) si `distro` est absent/None ou si
+    aucune ligne ne correspond à cette distro.
+    """
+    if distro:
+        with db_conn() as conn:
+            row = conn.execute(text("""
+                SELECT * FROM packages
+                WHERE name = :name AND distro = :distro
+                LIMIT 1
+            """), {"name": name, "distro": distro}).mappings().fetchone()
+        if row:
+            return {**dict(row), "format": "deb"}
+
+    return get_package_info(name)
+
+
 def is_indexed() -> bool:
     """Retourne True si l'index contient au moins un paquet."""
     with db_conn() as conn:
