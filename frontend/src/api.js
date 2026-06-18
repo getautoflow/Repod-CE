@@ -114,10 +114,11 @@ export const uploadPackage = (file, distribution = "jammy") => {
 
 // ─── Import depuis internet ───────────────────────────────────────────────────
 
-export const searchImportPackages = (q, limit = 60, source_id = null, format = null) => {
+export const searchImportPackages = (q, limit = 60, source_id = null, format = null, distro = null) => {
   const params = new URLSearchParams({ q, limit });
   if (source_id) params.append("source_id", source_id);
   if (format)    params.append("format", format);
+  if (distro)    params.append("distro", distro);
   return api.get(`/import/search?${params}`).then((r) => r.data);
 };
 

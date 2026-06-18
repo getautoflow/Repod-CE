@@ -270,7 +270,7 @@ function SearchImportTab() {
     setSelected(null);
     setDeps(null);
     try {
-      const data = await searchImportPackages(query.trim(), 60, null, currentFormat);
+      const data = await searchImportPackages(query.trim(), 60, null, currentFormat, distribution);
       setResults(data.results || []);
       if ((data.results || []).length === 0) toast(`Aucun résultat ${currentFormat.toUpperCase()} trouvé`);
     } catch (err) {

@@ -58,12 +58,13 @@ def search(
     limit: int = Query(20, ge=1, le=100),
     source_id: str = Query(None),
     format: str = Query(None, description="Filtre format : deb | rpm | apk"),
+    distro: str = Query(None, description="Filtre distribution : jammy, almalinux9, alpine3.21…"),
     current_user: str = Depends(get_current_user),
 ):
     """
     Recherche dans l'index local (Packages.gz mis en cache).
     Ne nécessite pas de connexion internet au moment de la recherche.
-    Le paramètre `format` filtre les résultats par type de paquet.
+    `format` filtre par type de paquet ; `distro` filtre par distribution cible.
     """
     if not is_indexed():
         raise HTTPException(
@@ -71,7 +72,7 @@ def search(
             detail="L'index local est vide. Lancez une synchronisation d'abord."
         )
 
-    results = search_packages(q, limit=limit, source_id=source_id)
+    results = search_packages(q, limit=limit, source_id=source_id, distro=distro)
 
     # Filtre côté serveur par format si spécifié
     if format in ("deb", "rpm", "apk"):

@@ -26,8 +26,8 @@ Interface compatible avec package_index_apt.py :
 """
 import io
 import tarfile
-import urllib.request
 import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -359,7 +359,7 @@ def list_packages_by_source(source_id: str, limit: int = 1000, offset: int = 0) 
     return [dict(r) for r in rows]
 
 
-def search_packages(query: str, limit: int = 30, source_id: str = None) -> list[dict]:
+def search_packages(query: str, limit: int = 30, source_id: str = None, distro: str = None) -> list[dict]:
     """Recherche des paquets APK dans l'index local."""
     query = query.strip()
     if not query:
@@ -373,6 +373,7 @@ def search_packages(query: str, limit: int = 30, source_id: str = None) -> list[
             FROM apk_packages
             WHERE (LOWER(name) LIKE LOWER(:q_wild) OR LOWER(description) LIKE LOWER(:q_wild))
             AND (:source_id IS NULL OR source_id = :source_id)
+            AND (:distro IS NULL OR distro LIKE :distro_pattern)
             ORDER BY
                 CASE
                     WHEN name = :q       THEN 0
@@ -387,6 +388,8 @@ def search_packages(query: str, limit: int = 30, source_id: str = None) -> list[
             "q_prefix": f"{query}%",
             "source_id": source_id,
             "limit": limit,
+            "distro": distro,
+            "distro_pattern": f"{distro}%" if distro else None,
         }).mappings().fetchall()
 
     return [dict(r) for r in rows]

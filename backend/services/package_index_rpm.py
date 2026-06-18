@@ -733,15 +733,22 @@ def list_packages_by_source(source_id: str, limit: int = 1000, offset: int = 0) 
     return [{**dict(r), "format": "rpm"} for r in rows]
 
 
-def search_packages(query: str, limit: int = 50, source_id: str | None = None) -> list[dict]:
+def search_packages(query: str, limit: int = 50, source_id: str | None = None, distro: str | None = None) -> list[dict]:
     """Recherche des paquets par nom ou résumé dans l'index local."""
     with db_conn() as conn:
         rows = conn.execute(text("""
             SELECT * FROM packages
             WHERE (LOWER(name) LIKE LOWER(:q) OR LOWER(summary) LIKE LOWER(:q))
             AND (:source_id IS NULL OR source_id = :source_id)
+            AND (:distro IS NULL OR distro LIKE :distro_pattern)
             ORDER BY name LIMIT :limit
-        """), {"q": f"%{query}%", "source_id": source_id, "limit": limit}).mappings().fetchall()
+        """), {
+            "q": f"%{query}%",
+            "source_id": source_id,
+            "limit": limit,
+            "distro": distro,
+            "distro_pattern": f"{distro}%" if distro else None,
+        }).mappings().fetchall()
     return [{**dict(r), "format": "rpm"} for r in rows]
 
 
