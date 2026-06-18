@@ -113,7 +113,7 @@ def decide_package(
 
     current_status = manifest.get("status", "validated")
     if current_status not in ("pending_review", "blocked", "accepted_risk",
-                               "exception", "upgrade_required"):
+                               "exception", "upgrade_required", "validated", "accepted"):
         raise HTTPException(status_code=409,
                             detail=f"Ce paquet n'est pas en révision (statut: {current_status})")
 
