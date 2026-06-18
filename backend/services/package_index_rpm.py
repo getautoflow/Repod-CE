@@ -510,7 +510,7 @@ def _open_streaming_decompressor(response, url: str):
     return response
 
 
-def _stream_download_and_parse(url: str, source_id: str,
+def _stream_download_and_parse(url: str, source_id: str, distro: str = "",
                                batch_size: int = 500, timeout: int = 300,
                                stop_event=None) -> int:
     """
@@ -543,10 +543,10 @@ def _stream_download_and_parse(url: str, source_id: str,
                 conn.execute(text("""
                     INSERT INTO packages
                     (source_id, name, version, arch, summary, description, group_name,
-                     size, url, rpm_url, sha256, requires, provides, synced_at)
+                     size, url, rpm_url, sha256, requires, provides, distro, synced_at)
                     VALUES
                     (:source_id, :name, :version, :arch, :summary, :description, :group_name,
-                     :size, :url, :rpm_url, :sha256, :requires, :provides, :synced_at)
+                     :size, :url, :rpm_url, :sha256, :requires, :provides, :distro, :synced_at)
                     ON CONFLICT (source_id, name, version, arch) DO UPDATE SET
                         summary = EXCLUDED.summary,
                         description = EXCLUDED.description,
@@ -557,6 +557,7 @@ def _stream_download_and_parse(url: str, source_id: str,
                         sha256 = EXCLUDED.sha256,
                         requires = EXCLUDED.requires,
                         provides = EXCLUDED.provides,
+                        distro = EXCLUDED.distro,
                         synced_at = EXCLUDED.synced_at
                 """), pkgs)
             total += len(pkgs)
@@ -586,7 +587,8 @@ def _stream_download_and_parse(url: str, source_id: str,
                             "group_name": pkg["group_name"], "size": pkg["size"],
                             "url": pkg["url"], "rpm_url": pkg["rpm_url"],
                             "sha256": pkg["sha256"], "requires": pkg["requires"],
-                            "provides": pkg.get("provides", ""), "synced_at": now,
+                            "provides": pkg.get("provides", ""), "distro": distro,
+                            "synced_at": now,
                         })
                 except Exception:
                     pass
@@ -637,7 +639,7 @@ def sync_source(source: dict, stop_event=None) -> dict:
         _log_sync(source_id, "error", 0, err)
         return {"source_id": source_id, "status": "error", "error": err}
 
-    pkg_count = _stream_download_and_parse(primary_url, source_id, stop_event=stop_event)
+    pkg_count = _stream_download_and_parse(primary_url, source_id, distro=source.get("distro", ""), stop_event=stop_event)
 
     if pkg_count == -2:
         return {"source_id": source_id, "status": "cancelled", "error": "Annulé"}
