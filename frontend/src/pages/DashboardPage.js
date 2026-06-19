@@ -20,6 +20,14 @@ const fmtBytes = b => {
   return `${(b / 1_073_741_824).toFixed(2)} GB`;
 };
 
+
+const fmtNum = n => {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (n >= 10_000)    return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return n.toLocaleString("fr-FR");
+};
+
 const fmtTs = iso =>
   iso
     ? new Date(iso).toLocaleString("fr-FR", {
@@ -153,7 +161,7 @@ function KpiCard({ label, value, sub, palette, onClick }) {
           style={{ color: palette.value }}
           className="text-[46px] font-extrabold leading-none tabular-nums"
         >
-          {value ?? "—"}
+          {value != null ? fmtNum(value) : "—"}
         </div>
         {sub && (
           <p style={{ color: palette.sub }} className="text-[12px] font-medium text-center leading-tight">
@@ -245,7 +253,7 @@ function CveDistribution({ posture }) {
           style={{ color: total > 0 ? C.red : C.green }}
           className="text-[28px] font-extrabold tabular-nums leading-none"
         >
-          {total}
+          {fmtNum(total)}
         </span>
         <span className="text-[10px] text-slate-400">
           CVE · {posture.scanned}/{posture.total} paquets analysés
@@ -272,9 +280,9 @@ function CveDistribution({ posture }) {
               </div>
               <span
                 style={{ color: n > 0 ? color : C.border }}
-                className="text-xs font-bold w-6 text-right tabular-nums flex-shrink-0"
+                className="text-xs font-bold w-8 text-right tabular-nums flex-shrink-0"
               >
-                {n}
+                {fmtNum(n)}
               </span>
             </div>
           );

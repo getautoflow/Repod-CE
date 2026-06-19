@@ -67,7 +67,7 @@ services:
       - repod_network
 
   backend:
-    image: ghcr.io/getautoflow/repod-ce/backend:${REPOD_VERSION:-latest}
+    image: repod-ce-backend:local
     container_name: backend-api
     depends_on:
       - apt-repo
@@ -136,7 +136,7 @@ services:
       - repod_network
 
   frontend:
-    image: ghcr.io/getautoflow/repod-ce/frontend:${REPOD_VERSION:-latest}
+    image: repod-ce-frontend:local
     container_name: frontend-ui
     depends_on:
       - backend

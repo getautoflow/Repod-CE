@@ -76,8 +76,10 @@ export const PERMISSIONS = {
   action_import:     ["admin", "maintainer"],
   action_delete_pkg: ["admin", "maintainer"],
   action_scan:       ["admin", "maintainer"],        // scan CVE manuel
-  action_manage_users: ["admin"],
-  action_settings:   ["admin"],
+  action_manage_users:   ["admin"],
+  action_manage_groups:  ["admin"],
+  action_manage_roles:   ["admin"],
+  action_settings:       ["admin"],
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

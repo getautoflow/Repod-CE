@@ -35,6 +35,9 @@ from routers.webhook_router import router as webhook_router
 from routers.license_router import router as license_router
 from routers.setup_router import router as setup_router
 from routers.logs_router import router as logs_router
+from routers.groups_router import router as groups_router
+from routers.roles_router import router as roles_router
+from auth.roles import seed_builtin_roles
 from services import scheduler_state
 from services import leader_election
 from services.security_sync import run_security_sync
@@ -239,6 +242,13 @@ async def lifespan(app: FastAPI):
         logger.info("[auth] init_db() exécuté (admin seeded si table vide).")
     except Exception as _idb_exc:
         logger.warning(f"[auth] init_db() échoué : {_idb_exc}")
+
+    # ── Seed des rôles built-in (idempotent) ──────────────────────────────
+    try:
+        seed_builtin_roles()
+        logger.info("[roles] Rôles built-in seedés.")
+    except Exception as _roles_exc:
+        logger.warning(f"[roles] seed_builtin_roles() échoué : {_roles_exc}")
 
     # ── Vérification de l'état du wizard de setup ────────────────────────────
     try:
@@ -459,3 +469,5 @@ app.include_router(license_router,       prefix=API_V1)
 # Setup wizard — public endpoints, pas de préfixe d'auth, monté en dernier
 app.include_router(setup_router,          prefix=API_V1)
 app.include_router(logs_router,           prefix=API_V1)
+app.include_router(groups_router,         prefix=API_V1)
+app.include_router(roles_router,          prefix=API_V1)

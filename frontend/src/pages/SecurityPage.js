@@ -1,15 +1,22 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import toast from "react-hot-toast";
+import { useAuth } from "../context/AuthContext";
 import {
   getClamavStatus, getApiBaseUrl,
   getPackagesPosture, getPackageCve, quarantinePackage,
   submitDecision, rescanPackage, deleteArtifact,
-  getSecurityDecisions, searchImportPackages, resolveDecision,
+  getSecurityDecisions, getMyDecisions, getUnassignedDecisions,
+  searchImportPackages, resolveDecision,
+  listGroups, listUsers, assignDecision,
+  updateDecision, deleteDecisionById,
 } from "../api";
 import Paginator from "../components/Paginator";
 
 const API_URL = getApiBaseUrl();
 
+// Comparaison "naturelle" de versions (dpkg/rpm-like) : compare segment par
+// segment (numérique vs alphabétique), suffisant pour trier/ordonner des
+// versions de paquets APT/RPM sans dépendance externe.
 function compareVersions(a, b) {
   const split = (v) => String(v).match(/\d+|\D+/g) || [];
   const pa = split(a), pb = split(b);
@@ -59,6 +66,28 @@ const SEV_CONFIG = {
   negligible: { label: "NEGLIGIBLE", bg: "bg-gray-100", text: "text-gray-500", dot: "bg-gray-400", ring: "ring-gray-200" },
   unknown:  { label: "UNKNOWN",  bg: "bg-gray-100", text: "text-gray-500", dot: "bg-gray-300", ring: "ring-gray-200" },
 };
+
+// Badge "Installé sur N machines" — croise le catalogue du dépôt avec
+// l'inventaire réel du parc (services/inventory.py: get_install_summary()).
+function InstallBadge({ count, clients }) {
+  if (!count) return null;
+  const labels = (clients || []).map((c) => c.label).filter(Boolean);
+  const title = labels.length
+    ? `Installé sur : ${labels.join(", ")}`
+    : `Installé sur ${count} machine${count > 1 ? "s" : ""}`;
+  return (
+    <a
+      href="/inventory"
+      title={title}
+      className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors w-fit"
+    >
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      {count} machine{count > 1 ? "s" : ""}
+    </a>
+  );
+}
 
 function SevBadge({ severity, count, size = "sm" }) {
   if (!count) return null;
@@ -219,7 +248,7 @@ const ACTIONS = [
   {
     key: "upgrade_required",
     label: "Exiger une mise à jour",
-    color: "bg-purple-600 hover:bg-purple-700",
+    color: "bg-blue-600 hover:bg-blue-700",
     icon: <svg className="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>,
     desc: "Le paquet reste hors dépôt jusqu'à la version cible. SLA de mise à jour imposé.",
     needsVersion: true,
@@ -235,23 +264,37 @@ const ACTIONS = [
 ];
 
 function DecisionModal({ pkg, onClose, onDecided }) {
-  const [action, setAction]         = useState(null);
-  const [justification, setJust]    = useState("");
-  const [expiryDays, setExpiryDays] = useState(30);
-  const [targetVersion, setTargetV] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [searching, setSearching]   = useState(false);
+  const [action, setAction]           = useState(null);
+  const [justification, setJust]      = useState("");
+  const [expiryDays, setExpiryDays]   = useState(30);
+  const [targetVersion, setTargetV]   = useState("");
+  const [submitting, setSubmitting]   = useState(false);
+  const [searching, setSearching]     = useState(false);
   const [searchResults, setSearchResults] = useState(null);
+  const [assignedTo, setAssignedTo]   = useState("");
+  const [assignedToType, setAssignedToType] = useState("user");
+  const [groups, setGroups]           = useState([]);
+  const [users, setUsers]             = useState([]);
+
+  useEffect(() => {
+    Promise.all([listGroups().catch(() => ({ groups: [] })), listUsers().catch(() => ({ users: [] }))])
+      .then(([gRes, uRes]) => { setGroups(gRes.groups || []); setUsers(uRes.users || []); });
+  }, []);
 
   const _sev_order = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"];
   const kev  = (pkg.cve_results || []).filter((c) => c.in_kev);
   const epssHigh = (pkg.cve_results || []).filter((c) => (c.epss_percent || 0) >= 10);
   const selectedAction = ACTIONS.find((a) => a.key === action);
 
+  // Versions de correction connues via le scan CVE (Grype peut en remonter plusieurs),
+  // triées de la plus ancienne à la plus récente
   const fixVersions = Array.from(new Set(
     (pkg.cve_results || []).flatMap((c) => c.fix_versions || [])
   )).sort(compareVersions);
 
+  // Version minimale à installer pour corriger l'ensemble des CVE détectées :
+  // la plus petite version corrective qui soit strictement supérieure à la
+  // version actuellement installée.
   const recommendedFix = fixVersions.find((v) => compareVersions(v, pkg.version) > 0)
     || fixVersions[fixVersions.length - 1];
 
@@ -261,15 +304,21 @@ function DecisionModal({ pkg, onClose, onDecided }) {
     try {
       const data = await searchImportPackages(pkg.name, 40);
       let exact = (data.results || []).filter((r) => r.name === pkg.name);
+
+      // Restreindre aux résultats de la même distribution/arch que le paquet
+      // décidé — un "fix" remonté depuis une autre distro n'est pas pertinent
+      // (numérotation de versions différente, dépôt différent).
       const sameDistro = exact.filter((r) =>
         (!pkg.distribution || r.distro === pkg.distribution) &&
         (!pkg.arch || r.arch === pkg.arch)
       );
       const usable = sameDistro.length > 0 ? sameDistro : exact;
       const otherDistro = sameDistro.length === 0 && exact.length > 0;
+
       const versions = Array.from(new Set(usable.map((r) => r.version)))
         .filter(Boolean)
         .sort(compareVersions);
+
       setSearchResults({ versions, otherDistro });
       if (versions.length === 0) toast.error("Aucune version trouvée dans les sources importées");
     } catch (e) {
@@ -279,6 +328,10 @@ function DecisionModal({ pkg, onClose, onDecided }) {
     }
   };
 
+  // Version recommandée parmi les résultats disponibles dans les sources
+  // importées : la plus petite version qui couvre le correctif minimal connu.
+  // Si aucun correctif n'est connu via le scan CVE (fixVersions vide), on ne
+  // recommande rien ici — sinon on retomberait sur la version déjà installée.
   const recommendedAvailable = recommendedFix
     ? searchResults?.versions?.find((v) => compareVersions(v, recommendedFix) >= 0)
     : undefined;
@@ -297,6 +350,8 @@ function DecisionModal({ pkg, onClose, onDecided }) {
         expires_in_days: selectedAction?.needsExpiry ? expiryDays : null,
         target_version:  selectedAction?.needsVersion ? targetVersion.trim() : null,
         arch: pkg.arch || "amd64",
+        assigned_to:      assignedTo || null,
+        assigned_to_type: assignedTo ? assignedToType : null,
       });
       toast.success(`Décision "${action}" enregistrée pour ${pkg.name}`);
       onDecided();
@@ -428,6 +483,7 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
 
+              {/* Versions de correction connues via les CVE détectées */}
               {fixVersions.length > 0 && (
                 <div className="mt-2">
                   <p className="text-[11px] text-gray-400 mb-1">
@@ -442,7 +498,11 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                           key={v}
                           type="button"
                           onClick={() => setTargetV(v)}
-                          title={isOlder ? "Version ≤ version installée" : isRecommended ? "Version minimale corrigeant les CVE détectées" : undefined}
+                          title={isOlder
+                            ? "Version ≤ version installée — probablement non pertinente"
+                            : isRecommended
+                              ? "Version minimale corrigeant les CVE détectées"
+                              : undefined}
                           className={`px-2 py-1 rounded-md text-xs font-mono border transition-colors flex items-center gap-1 ${
                             targetVersion === v
                               ? "border-blue-500 bg-blue-50 text-blue-700"
@@ -461,12 +521,14 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                   </div>
                   {recommendedFix && (
                     <p className="text-[11px] text-amber-600 mt-1">
-                      <strong>{recommendedFix}</strong> est la version minimale corrigeant l&apos;ensemble des CVE (au-dessus de {pkg.version}).
+                      <strong>{recommendedFix}</strong> est la version minimale corrigeant l&apos;ensemble
+                      des CVE détectées (au-dessus de la version installée {pkg.version}).
                     </p>
                   )}
                 </div>
               )}
 
+              {/* Recherche automatique dans les sources importées */}
               <div className="mt-2">
                 <button
                   type="button"
@@ -489,8 +551,9 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                   <div className="mt-1.5">
                     <p className="text-[11px] text-gray-400 mb-1">
                       Versions disponibles dans les sources configurées
+                      {pkg.distribution && !searchResults.otherDistro && <> (distribution <span className="font-mono">{pkg.distribution}</span>)</>}
                       {searchResults.otherDistro && <> — aucune trouvée pour <span className="font-mono">{pkg.distribution}</span>, résultats toutes distributions</>}
-                       — du plus ancien au plus récent :
+                      — du plus ancien au plus récent :
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       {searchResults.versions.map((v) => {
@@ -502,6 +565,13 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                             key={v}
                             type="button"
                             onClick={() => setTargetV(v)}
+                            title={isInstalled
+                              ? "Version actuellement installée"
+                              : isOlder
+                                ? "Version < version installée — probablement non pertinente"
+                                : isRecommended
+                                  ? "Plus petite version disponible couvrant le correctif minimal"
+                                  : undefined}
                             className={`px-2 py-1 rounded-md text-xs font-mono border transition-colors flex items-center gap-1 ${
                               targetVersion === v
                                 ? "border-blue-500 bg-blue-50 text-blue-700"
@@ -519,10 +589,62 @@ function DecisionModal({ pkg, onClose, onDecided }) {
                         );
                       })}
                     </div>
+                    {recommendedFix ? (
+                      recommendedAvailable ? (
+                        <p className="text-[11px] text-amber-600 mt-1">
+                          <strong>{recommendedAvailable}</strong> est la version la plus ancienne disponible
+                          qui corrige les CVE détectées — recommandée pour limiter l&apos;écart avec la version
+                          installée.
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          Aucune version ≥ <strong>{recommendedFix}</strong> (correctif recommandé) n&apos;est
+                          encore disponible dans les sources configurées.
+                        </p>
+                      )
+                    ) : (
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        Aucun correctif connu via le scan CVE pour cette version — vérifiez manuellement la
+                        version cible à utiliser.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
             </div>
+          )}
+        </div>
+
+        {/* Assignation */}
+        <div className="px-6 pb-4">
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+            Assigner à (optionnel)
+          </label>
+          <div className="flex gap-2">
+            <select
+              value={assignedToType}
+              onChange={(e) => { setAssignedToType(e.target.value); setAssignedTo(""); }}
+              className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="user">Utilisateur</option>
+              <option value="group">Groupe</option>
+            </select>
+            <select
+              value={assignedTo}
+              onChange={(e) => setAssignedTo(e.target.value)}
+              className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">— Aucune assignation —</option>
+              {assignedToType === "group"
+                ? groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)
+                : users.map((u) => <option key={u.username} value={u.username}>{u.username}{u.full_name ? ` (${u.full_name})` : ""}</option>)
+              }
+            </select>
+          </div>
+          {assignedTo && (
+            <p className="text-[11px] text-blue-600 mt-1">
+              Une notification sera envoyée à l'assigné.
+            </p>
           )}
         </div>
 
@@ -556,7 +678,7 @@ function DecisionModal({ pkg, onClose, onDecided }) {
   );
 }
 
-// ─── Suivi des décisions RSSI (audit) ────────────────────────────────────────
+// ─── Section Suivi des décisions RSSI (audit) ────────────────────────────────
 
 const DECISION_FILTERS = [
   { key: "all",              label: "Toutes" },
@@ -567,9 +689,752 @@ const DECISION_FILTERS = [
   { key: "resolved",         label: "Résolu" },
 ];
 
+function AssignedBadge({ assignedTo, assignedToType }) {
+  if (!assignedTo) return <span className="text-gray-300 text-xs">—</span>;
+  const icon = assignedToType === "group" ? "👥" : "👤";
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
+      {icon} {assignedTo}
+    </span>
+  );
+}
+
+// ─── Icônes d'action ─────────────────────────────────────────────────────────
+const IconEye = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+  </svg>
+);
+const IconPencil = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+  </svg>
+);
+const IconTrash = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+// ─── Modal lecture seule + assignation ───────────────────────────────────────
+function DecisionViewModal({ decision: initialDecision, onClose, canAssign, onAssigned }) {
+  const [decision, setDecision]   = useState(initialDecision);
+  const [assigning, setAssigning] = useState(false);
+  const [asnType, setAsnType]     = useState(initialDecision.assigned_to_type || "user");
+  const [asnTarget, setAsnTarget] = useState(initialDecision.assigned_to || "");
+  const [groups, setGroups]       = useState([]);
+  const [users, setUsers]         = useState([]);
+  const [saving, setSaving]       = useState(false);
+
+  useEffect(() => {
+    if (!assigning) return;
+    Promise.all([
+      listGroups().catch(() => ({ groups: [] })),
+      listUsers().catch(() => ({ users: [] })),
+    ]).then(([g, u]) => { setGroups(g.groups || []); setUsers(u.users || []); });
+    setAsnType(decision.assigned_to_type || "user");
+    setAsnTarget(decision.assigned_to || "");
+  }, [assigning, decision.assigned_to, decision.assigned_to_type]);
+
+  const handleAssign = async () => {
+    setSaving(true);
+    try {
+      const res = await assignDecision(decision.id, asnTarget || null, asnTarget ? asnType : null);
+      setDecision(res.decision);
+      toast.success(asnTarget ? `Assigné à ${asnTarget}` : "Assignation retirée");
+      setAssigning(false);
+      onAssigned?.();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Erreur lors de l'assignation");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!decision) return null;
+  const sla = decision.sla || {};
+  const asnOptions  = asnType === "group" ? groups : users;
+  const asnOptKey   = asnType === "group" ? "id" : "username";
+  const asnOptLabel = asnType === "group"
+    ? (o) => o.name
+    : (o) => o.username + (o.full_name ? ` (${o.full_name})` : "");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-100">
+          <div>
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Décision RSSI</p>
+            <h3 className="text-base font-semibold text-gray-900 font-mono">{decision.package}</h3>
+            <p className="text-xs text-gray-400 font-mono">{decision.version}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors mt-1">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {/* Décision + statut */}
+          <div className="flex flex-wrap gap-3">
+            <div>
+              <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Décision</p>
+              <DecisionBadge action={decision.action} />
+            </div>
+            {decision.action === "upgrade_required" && decision.target_version && (
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Version cible</p>
+                <span className="text-xs font-mono text-gray-700 bg-gray-100 px-2 py-0.5 rounded">→ {decision.target_version}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Méta */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Décidé par</p>
+              <p className="text-sm text-gray-700">{decision.decided_by || "—"}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Le</p>
+              <p className="text-sm text-gray-700">
+                {decision.decided_at ? new Date(decision.decided_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+              </p>
+            </div>
+            {sla.has_sla && (
+              <div className="col-span-2">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">SLA</p>
+                <span className={`text-xs font-medium ${sla.expired ? "text-red-600" : sla.warning ? "text-amber-600" : "text-green-600"}`}>
+                  {sla.expired ? "Expiré" : `${sla.remaining_days}j restants`}
+                  {sla.expires_at && <span className="text-gray-400 font-normal ml-1">({new Date(sla.expires_at).toLocaleDateString("fr-FR")})</span>}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Assignation ── */}
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Assignation</p>
+                {decision.assigned_to && !assigning && (
+                  <AssignedBadge assignedTo={decision.assigned_to} assignedToType={decision.assigned_to_type} />
+                )}
+                {!decision.assigned_to && !assigning && (
+                  <span className="text-xs text-gray-300 italic">Non assignée</span>
+                )}
+              </div>
+              {canAssign && !assigning && (
+                <button onClick={() => setAssigning(true)}
+                  className="text-[11px] font-medium text-blue-600 hover:text-blue-700 transition-colors">
+                  {decision.assigned_to ? "Modifier" : "Assigner"}
+                </button>
+              )}
+            </div>
+
+            {assigning && (
+              <div className="px-4 py-3 space-y-3">
+                {/* Type user / groupe */}
+                <div className="flex gap-2">
+                  {["user", "group"].map((t) => (
+                    <button key={t} onClick={() => { setAsnType(t); setAsnTarget(""); }}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                        asnType === t
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                      }`}>
+                      {t === "user" ? "Utilisateur" : "Groupe"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Sélecteur */}
+                <select value={asnTarget} onChange={(e) => setAsnTarget(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">— Retirer l'assignation —</option>
+                  {asnOptions.map((o) => (
+                    <option key={o[asnOptKey]} value={o[asnOptKey]}>{asnOptLabel(o)}</option>
+                  ))}
+                </select>
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button onClick={() => setAssigning(false)}
+                    className="flex-1 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                    Annuler
+                  </button>
+                  <button onClick={handleAssign} disabled={saving}
+                    className="flex-1 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50">
+                    {saving ? "…" : "Confirmer"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* CVEs */}
+          {(decision.cve_ids || []).length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">CVE couverts</p>
+              <div className="flex flex-wrap gap-1.5">
+                {decision.cve_ids.map((id) => (
+                  <span key={id} className="text-[11px] font-mono bg-red-50 text-red-700 border border-red-100 px-2 py-0.5 rounded">{id}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Justification */}
+          <div>
+            <p className="text-[10px] font-semibold text-gray-400 uppercase mb-2">Justification</p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+              {decision.justification || <span className="text-gray-300 italic">Aucune justification</span>}
+            </div>
+          </div>
+
+          {/* Résolution */}
+          {decision.resolved_at && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Résolu</p>
+              <p className="text-xs text-gray-600">
+                {new Date(decision.resolved_at).toLocaleDateString("fr-FR")} par <strong>{decision.resolved_by}</strong>
+              </p>
+              {decision.resolution_note && <p className="text-xs text-gray-500 mt-1 italic">{decision.resolution_note}</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="w-full py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors">
+            Fermer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal d'édition ─────────────────────────────────────────────────────────
+const ACTIONS_OPTS = [
+  { value: "accept_risk",      label: "Accepter le risque" },
+  { value: "exception",        label: "Exception temporaire" },
+  { value: "reject",           label: "Rejeter" },
+  { value: "upgrade_required", label: "Upgrade requis" },
+];
+
+function DecisionEditModal({ decision, onClose, onSaved }) {
+  const [action, setAction]         = useState(decision.action);
+  const [justif, setJustif]         = useState(decision.justification || "");
+  const [expires, setExpires]       = useState(decision.expires_in_days ?? "");
+  const [target, setTarget]         = useState(decision.target_version || "");
+  const [asnType, setAsnType]       = useState(decision.assigned_to_type || "user");
+  const [asnTarget, setAsnTarget]   = useState(decision.assigned_to || "");
+  const [groups, setGroups]         = useState([]);
+  const [users, setUsers]           = useState([]);
+  const [saving, setSaving]         = useState(false);
+
+  const needsExpiry = action === "accept_risk" || action === "exception";
+  const needsTarget = action === "upgrade_required";
+
+  useEffect(() => {
+    Promise.all([
+      listGroups().catch(() => ({ groups: [] })),
+      listUsers().catch(() => ({ users: [] })),
+    ]).then(([g, u]) => { setGroups(g.groups || []); setUsers(u.users || []); });
+  }, []);
+
+  const handleSave = async () => {
+    if (!justif.trim()) { toast.error("La justification est obligatoire"); return; }
+    setSaving(true);
+    try {
+      await updateDecision(decision.id, {
+        action,
+        justification: justif.trim(),
+        expires_in_days: needsExpiry && expires ? parseInt(expires, 10) : null,
+        target_version:  needsTarget ? target.trim() || null : null,
+      });
+      // Assignation si changée
+      const asnChanged = asnTarget !== (decision.assigned_to || "") || asnType !== (decision.assigned_to_type || "user");
+      if (asnChanged) {
+        await assignDecision(decision.id, asnTarget || null, asnTarget ? asnType : null);
+      }
+      toast.success("Décision mise à jour");
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Erreur lors de la mise à jour");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const asnOptions  = asnType === "group" ? groups : users;
+  const asnOptKey   = asnType === "group" ? "id" : "username";
+  const asnOptLabel = asnType === "group"
+    ? (o) => o.name
+    : (o) => o.username + (o.full_name ? ` (${o.full_name})` : "");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
+          <div>
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Modifier la décision</p>
+            <h3 className="text-base font-semibold text-gray-900 font-mono">{decision.package} <span className="text-gray-400 font-normal">{decision.version}</span></h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors mt-1">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {/* Action */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Décision</label>
+            <div className="grid grid-cols-2 gap-2">
+              {ACTIONS_OPTS.map((opt) => (
+                <button key={opt.value} onClick={() => setAction(opt.value)}
+                  className={`py-2 px-3 rounded-xl text-xs font-medium border transition-colors text-left ${
+                    action === opt.value
+                      ? "border-blue-400 bg-blue-50 text-blue-700"
+                      : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                  }`}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {needsExpiry && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Expiration (jours)</label>
+              <input type="number" min="1" value={expires} onChange={(e) => setExpires(e.target.value)}
+                placeholder="ex: 90"
+                className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          )}
+
+          {needsTarget && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Version cible (correctif)</label>
+              <input type="text" value={target} onChange={(e) => setTarget(e.target.value)}
+                placeholder="ex: 2.35-0ubuntu3.4"
+                className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          )}
+
+          {/* Justification */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Justification <span className="text-red-500">*</span></label>
+            <textarea rows={4} value={justif} onChange={(e) => setJustif(e.target.value)}
+              className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              placeholder="Justification de la décision..." />
+          </div>
+
+          {/* Assignation */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Assignation</label>
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              {/* Toggle user / groupe */}
+              <div className="flex border-b border-gray-200">
+                {["user", "group"].map((t) => (
+                  <button key={t} onClick={() => { setAsnType(t); setAsnTarget(""); }}
+                    className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                      asnType === t
+                        ? "bg-blue-600 text-white"
+                        : "bg-white text-gray-500 hover:bg-gray-50"
+                    }`}>
+                    {t === "user" ? "Utilisateur" : "Groupe"}
+                  </button>
+                ))}
+              </div>
+              <div className="p-2">
+                <select value={asnTarget} onChange={(e) => setAsnTarget(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">— Aucune assignation —</option>
+                  {asnOptions.map((o) => (
+                    <option key={o[asnOptKey]} value={o[asnOptKey]}>{asnOptLabel(o)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 pb-5 pt-3 flex gap-3 border-t border-gray-100 shrink-0">
+          <button onClick={onClose}
+            className="flex-1 py-2 text-sm text-gray-500 border border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-colors">
+            Annuler
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors disabled:opacity-50">
+            {saving ? "Enregistrement…" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Boutons d'actions par ligne ──────────────────────────────────────────────
+function DecisionRowActions({ decision, canEdit, canDelete, onView, onEdit, onDeleted, onRefresh }) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting]     = useState(false);
+  const ref                         = useRef(null);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setConfirming(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [confirming]);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteDecisionById(decision.id);
+      toast.success(`Décision supprimée (${decision.package} ${decision.version})`);
+      setConfirming(false);
+      onDeleted();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Erreur lors de la suppression");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1" ref={ref}>
+      {/* Voir */}
+      <button onClick={onView} title="Voir les détails"
+        className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+        <IconEye />
+      </button>
+
+      {/* Modifier */}
+      {canEdit && (
+        <button onClick={onEdit} title="Modifier la décision"
+          className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors">
+          <IconPencil />
+        </button>
+      )}
+
+      {/* Supprimer */}
+      {canDelete && (
+        <div className="relative">
+          {confirming ? (
+            <div className="absolute z-20 right-0 top-full mt-1 bg-white border border-red-200 rounded-xl shadow-lg p-3 w-52">
+              <p className="text-xs text-gray-700 font-medium mb-2">Supprimer cette décision ?</p>
+              <p className="text-[11px] text-gray-400 mb-3">Cette action est irréversible.</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirming(false)}
+                  className="flex-1 py-1 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                  Annuler
+                </button>
+                <button onClick={handleDelete} disabled={deleting}
+                  className="flex-1 py-1 text-xs font-medium bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors disabled:opacity-50">
+                  {deleting ? "…" : "Supprimer"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirming(true)} title="Supprimer la décision"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+              <IconTrash />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const VIEW_TABS = [
+  { key: "all",        label: "Toutes" },
+  { key: "mine",       label: "Mes décisions" },
+  { key: "unassigned", label: "Non assignées" },
+];
+
+function DecisionsTrackingSection() {
+  const { user } = useAuth();
+  const [decisions, setDecisions]   = useState(null);
+  const [loading, setLoading]       = useState(true);
+  const [filter, setFilter]         = useState("all");
+  const [viewTab, setViewTab]       = useState("all");
+  const [unassignedCount, setUnassignedCount] = useState(0);
+  const [viewDecision, setViewDecision]   = useState(null);
+  const [editDecision, setEditDecision]   = useState(null);
+
+  const loadDecisions = useCallback(async (tab) => {
+    setLoading(true);
+    try {
+      let data;
+      if (tab === "mine")       data = await getMyDecisions();
+      else if (tab === "unassigned") data = await getUnassignedDecisions();
+      else                      data = await getSecurityDecisions();
+      setDecisions(data.decisions || []);
+      // Compte non assignées pour badge
+      if (tab !== "unassigned") {
+        getUnassignedDecisions().then((d) => setUnassignedCount(d.count || 0)).catch(() => {});
+      } else {
+        setUnassignedCount(data.count || 0);
+      }
+    } catch {
+      toast.error("Impossible de charger le suivi des décisions");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadDecisions(viewTab); }, [viewTab, loadDecisions]);
+
+  const handleTabChange = (tab) => { setViewTab(tab); setFilter("all"); };
+
+  const filtered = (decisions || []).filter(
+    (d) => filter === "all"
+      || (filter === "resolved" ? !!d.resolved_at : d.action === filter)
+  );
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="w-full flex items-center justify-between px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
+            <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Suivi des décisions RSSI</h2>
+            <p className="text-xs text-gray-400">
+              Historique des décisions de sécurité, statut SLA et disponibilité des correctifs — pour audit.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-gray-100">
+          {/* Onglets vue */}
+          <div className="flex items-center gap-1 px-6 pt-3 pb-0">
+            {VIEW_TABS.map((tab) => (
+              <button key={tab.key} onClick={() => handleTabChange(tab.key)}
+                className={`relative px-3 py-1.5 text-xs font-medium rounded-t-lg border-b-2 transition-colors ${
+                  viewTab === tab.key
+                    ? "border-blue-500 text-blue-700 bg-blue-50"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}>
+                {tab.label}
+                {tab.key === "unassigned" && unassignedCount > 0 && (
+                  <span className="ml-1 bg-red-500 text-white text-[10px] rounded-full px-1.5 py-0.5">
+                    {unassignedCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Filtres */}
+          <div className="flex items-center gap-2 px-6 py-3 flex-wrap border-b border-gray-100">
+            {DECISION_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  filter === f.key
+                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    : "border-gray-200 text-gray-500 hover:border-gray-300"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-gray-400 tabular-nums">
+              {loading ? "…" : `${filtered.length} décision${filtered.length > 1 ? "s" : ""}`}
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center text-gray-400 text-sm">Chargement...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">Aucune décision enregistrée.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100 bg-gray-50/50">
+                    <th className="px-6 py-2.5">Paquet</th>
+                    <th className="px-3 py-2.5">Décision</th>
+                    <th className="px-3 py-2.5">Par</th>
+                    <th className="px-3 py-2.5">Assigné à</th>
+                    <th className="px-3 py-2.5 whitespace-nowrap">Le</th>
+                    <th className="px-3 py-2.5">Suivi</th>
+                    <th className="px-3 py-2.5">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filtered.map((d) => {
+                    const isOwn = d.decided_by === user?.username;
+                    const isAdmin = user?.role === "admin";
+                    const isMaintainer = user?.role === "maintainer";
+                    const canEdit   = isAdmin || (isMaintainer && isOwn);
+                    const canDelete = isAdmin || (isMaintainer && isOwn);
+                    const canAssign = isAdmin || isMaintainer;
+                    return (
+                      <tr key={d.id || `${d.package}-${d.version}-${d.decided_at}`}
+                        className="hover:bg-blue-50/30 transition-colors group">
+                        {/* Paquet */}
+                        <td className="px-6 py-3">
+                          <p className="font-mono text-xs font-semibold text-gray-800 leading-tight">{d.package}</p>
+                          <p className="text-[11px] text-gray-400 font-mono mt-0.5">{d.version}</p>
+                          <InstallBadge count={d.install_count} clients={d.install_clients} />
+                        </td>
+                        {/* Décision */}
+                        <td className="px-3 py-3">
+                          <DecisionBadge action={d.action} />
+                          {d.action === "upgrade_required" && d.target_version && (
+                            <p className="text-[11px] text-gray-400 font-mono mt-1">→ {d.target_version}</p>
+                          )}
+                        </td>
+                        {/* Par */}
+                        <td className="px-3 py-3">
+                          <p className="text-xs text-gray-600 font-medium">{d.decided_by || "—"}</p>
+                        </td>
+                        {/* Assigné à */}
+                        <td className="px-3 py-3">
+                          <AssignedBadge assignedTo={d.assigned_to} assignedToType={d.assigned_to_type} />
+                        </td>
+                        {/* Date */}
+                        <td className="px-3 py-3">
+                          <p className="text-xs text-gray-400 whitespace-nowrap">
+                            {d.decided_at ? new Date(d.decided_at).toLocaleDateString("fr-FR") : "—"}
+                          </p>
+                          {d.sla?.has_sla && (
+                            <p className={`text-[11px] mt-0.5 ${d.sla.expired ? "text-red-500" : d.sla.warning ? "text-amber-500" : "text-green-600"}`}>
+                              {d.sla.expired ? "SLA expiré" : `${d.sla.remaining_days}j SLA`}
+                            </p>
+                          )}
+                        </td>
+                        {/* Suivi */}
+                        <td className="px-3 py-3">
+                          <DecisionTrackingStatus decision={d} onImported={() => loadDecisions(viewTab)} />
+                        </td>
+                        {/* Actions */}
+                        <td className="px-3 py-3">
+                          <DecisionRowActions
+                            decision={d}
+                            canEdit={canEdit}
+                            canDelete={canDelete}
+                            onView={() => setViewDecision(d)}
+                            onEdit={() => setEditDecision(d)}
+                            onDeleted={() => loadDecisions(viewTab)}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+      </div>
+
+      {/* Modales */}
+      {viewDecision && (
+        <DecisionViewModal
+          decision={viewDecision}
+          onClose={() => setViewDecision(null)}
+          canAssign={["admin","maintainer"].includes(user?.role)}
+          onAssigned={() => loadDecisions(viewTab)}
+        />
+      )}
+      {editDecision && (
+        <DecisionEditModal
+          decision={editDecision}
+          onClose={() => setEditDecision(null)}
+          onSaved={() => loadDecisions(viewTab)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DecisionTrackingStatus({ decision, onImported }) {
+  const sla = decision.sla;
+  const patch = decision.patch_status;
+  const indexStatus = decision.index_status;
+
+  if (decision.action === "upgrade_required") {
+    if (decision.resolved_at) {
+      return (
+        <div className="flex flex-col gap-1 items-start">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
+            <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+            Résolu
+          </span>
+          <p className="text-[11px] text-gray-400">
+            {new Date(decision.resolved_at).toLocaleDateString("fr-FR")} par {decision.resolved_by}
+          </p>
+        </div>
+      );
+    }
+    if (patch?.available) {
+      return (
+        <div className="flex flex-col gap-1.5 items-start">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-700">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+            Correctif disponible ({patch.depot_version})
+          </span>
+          <ResolveDecisionButton decision={decision} onResolved={onImported} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-1.5 items-start">
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+          En attente du correctif
+        </span>
+        {indexStatus?.available && (
+          <ImportNowButton decision={decision} onImported={onImported} />
+        )}
+      </div>
+    );
+  }
+
+  if (sla?.has_sla) {
+    if (sla.expired) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+          Expiré ({sla.expires_at?.slice(0, 10)})
+        </span>
+      );
+    }
+    if (sla.warning) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-100 text-orange-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+          Expire dans {sla.remaining_days}j
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700">
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+        Valide ({sla.remaining_days}j restants)
+      </span>
+    );
+  }
+
+  return <span className="text-xs text-gray-300">—</span>;
+}
+
+// ─── Bouton "Marquer comme résolu" — clôture une décision upgrade_required ──
 function ResolveDecisionButton({ decision, onResolved }) {
-  const [open, setOpen]             = useState(false);
-  const [note, setNote]             = useState("");
+  const [open, setOpen]       = useState(false);
+  const [note, setNote]       = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const confirm = () => {
@@ -605,7 +1470,11 @@ function ResolveDecisionButton({ decision, onResolved }) {
             </div>
             <div className="px-5 py-4 space-y-3">
               <p className="text-xs text-gray-500">
-                Le correctif {decision.target_version} a été déployé.
+                Le correctif {decision.target_version} est disponible dans le dépôt
+                ({decision.patch_status?.depot_version}).
+                {decision.install_count > 0 && (
+                  <> {decision.install_count} machine{decision.install_count > 1 ? "s" : ""} {decision.install_count > 1 ? "restent" : "reste"} sur l&apos;ancienne version.</>
+                )}
               </p>
               <textarea
                 value={note}
@@ -638,11 +1507,12 @@ function ResolveDecisionButton({ decision, onResolved }) {
   );
 }
 
+// ─── Bouton "Importer maintenant" — récupère le correctif depuis l'index sync ─
 function ImportNowButton({ decision, onImported }) {
-  const [open, setOpen]       = useState(false);
-  const [logs, setLogs]       = useState([]);
+  const [open, setOpen]     = useState(false);
+  const [logs, setLogs]     = useState([]);
   const [running, setRunning] = useState(false);
-  const [done, setDone]       = useState(false);
+  const [done, setDone]     = useState(false);
 
   const start = () => {
     setOpen(true);
@@ -725,191 +1595,6 @@ function ImportNowButton({ decision, onImported }) {
         </div>
       )}
     </>
-  );
-}
-
-function DecisionTrackingStatus({ decision, onImported }) {
-  const sla   = decision.sla;
-  const patch = decision.patch_status;
-
-  if (decision.action === "upgrade_required") {
-    if (decision.resolved_at) {
-      return (
-        <div className="flex flex-col gap-1 items-start">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-            Résolu
-          </span>
-          <p className="text-[11px] text-gray-400">
-            {new Date(decision.resolved_at).toLocaleDateString("fr-FR")} par {decision.resolved_by}
-          </p>
-        </div>
-      );
-    }
-    if (patch?.available) {
-      return (
-        <div className="flex flex-col gap-1.5 items-start">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-700">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-            Correctif disponible ({patch.depot_version})
-          </span>
-          <ResolveDecisionButton decision={decision} onResolved={onImported} />
-        </div>
-      );
-    }
-    if (decision.index_status?.available) {
-      return (
-        <div className="flex flex-col gap-1.5 items-start">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-            En attente du correctif
-          </span>
-          <ImportNowButton decision={decision} onImported={onImported} />
-        </div>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-        En attente du correctif
-      </span>
-    );
-  }
-
-  if (sla?.has_sla) {
-    if (sla.expired) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-700">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-          Expiré ({sla.expires_at?.slice(0, 10)})
-        </span>
-      );
-    }
-    if (sla.warning) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-100 text-orange-700">
-          <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
-          Expire dans {sla.remaining_days}j
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700">
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-        Valide ({sla.remaining_days}j restants)
-      </span>
-    );
-  }
-
-  return <span className="text-xs text-gray-300">—</span>;
-}
-
-function DecisionsTrackingSection() {
-  const [decisions, setDecisions] = useState(null);
-  const [loading, setLoading]     = useState(true);
-  const [filter, setFilter]       = useState("all");
-
-  const reload = () => {
-    setLoading(true);
-    getSecurityDecisions()
-      .then((d) => setDecisions(d.decisions || []))
-      .catch(() => toast.error("Impossible de charger le suivi des décisions"))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => { reload(); }, []);
-
-  const filtered = (decisions || []).filter(
-    (d) => filter === "all"
-      || (filter === "resolved" ? !!d.resolved_at : d.action === filter)
-  );
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <div className="w-full flex items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center">
-            <svg className="w-5 h-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
-            </svg>
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900">Suivi des décisions RSSI</h2>
-            <p className="text-xs text-gray-400">
-              Historique des décisions de sécurité, statut SLA et correctifs — pour audit.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="border-t border-gray-100">
-        <div className="flex items-center gap-2 px-6 py-3 flex-wrap border-b border-gray-100">
-          {DECISION_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                filter === f.key
-                  ? "border-blue-300 bg-blue-50 text-blue-700"
-                  : "border-gray-200 text-gray-500 hover:border-gray-300"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-          <span className="ml-auto text-xs text-gray-400 tabular-nums">
-            {loading ? "…" : `${filtered.length} décision${filtered.length > 1 ? "s" : ""}`}
-          </span>
-        </div>
-
-        {loading ? (
-          <div className="p-8 text-center text-gray-400 text-sm">Chargement...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-gray-400 text-sm">Aucune décision enregistrée.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
-                  <th className="px-6 py-2">Paquet</th>
-                  <th className="px-3 py-2">Décision</th>
-                  <th className="px-3 py-2">Par</th>
-                  <th className="px-3 py-2">Le</th>
-                  <th className="px-3 py-2">Justification</th>
-                  <th className="px-3 py-2">Suivi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((d) => (
-                  <tr key={`${d.package}-${d.version}-${d.decided_at}`} className="border-b border-gray-50 last:border-b-0 hover:bg-gray-50/60">
-                    <td className="px-6 py-2.5">
-                      <p className="font-mono text-xs font-medium text-gray-800">{d.package}</p>
-                      <p className="text-[11px] text-gray-400 font-mono">{d.version}</p>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <DecisionBadge action={d.action} />
-                      {d.action === "upgrade_required" && d.target_version && (
-                        <p className="text-[11px] text-gray-400 font-mono mt-1">→ {d.target_version}</p>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-gray-600">{d.decided_by}</td>
-                    <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">
-                      {d.decided_at ? new Date(d.decided_at).toLocaleDateString("fr-FR") : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-gray-500 max-w-xs">
-                      <p className="line-clamp-2" title={d.justification}>{d.justification}</p>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <DecisionTrackingStatus decision={d} onImported={reload} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -1031,6 +1716,7 @@ function CvePostureSection({ onDecideRequest }) {
     return true;
   });
 
+  // File de révision : tri par score de risque combiné (sévérité + KEV + EPSS + exposition parc)
   if (decisFilter === "queue") {
     visible.sort((a, b) => (b.risk_score || 0) - (a.risk_score || 0));
   }
@@ -1047,9 +1733,10 @@ function CvePostureSection({ onDecideRequest }) {
   const blockedCount = packagesWithFmt.filter(p => p.status === "blocked").length;
 
   return (
-<>
+    <>
       {selectedPkg && <CveModal pkg={selectedPkg} onClose={() => setSelected(null)} />}
 
+      {/* ── Bandeau "File de révision" — raccourci vers les paquets à décider ── */}
       {queueCount > 0 && decisFilter !== "queue" && (
         <button
           onClick={() => { setDecis("queue"); setSev("all"); setKev(false); setPkgPage(1); }}
@@ -1057,7 +1744,7 @@ function CvePostureSection({ onDecideRequest }) {
         >
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center">
-              <svg className="w-4 h-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-4.5 h-4.5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
@@ -1222,7 +1909,7 @@ function CvePostureSection({ onDecideRequest }) {
                   const isLoading = (k) => actionLoading === `${k}:${pkg.name}`;
                   const needsDecision = !pkg.decision_action && pkg.scanned && pkg.total_cve > 0 && pkg.status !== "superseded";
                   const rowBg =
-                    pkg.status === "quarantined"    ? "bg-purple-50/40" :
+                    pkg.status === "quarantined"    ? "bg-blue-50/40" :
                     pkg.cve_counts?.critical > 0   ? "bg-red-50/30 hover:bg-red-50/60" :
                     pkg.cve_counts?.high > 0       ? "bg-orange-50/20 hover:bg-orange-50/50" :
                     "hover:bg-gray-50/60";
@@ -1236,7 +1923,7 @@ function CvePostureSection({ onDecideRequest }) {
                           <p className="font-mono font-semibold text-gray-900 text-sm">{pkg.name}</p>
                           <p className="font-mono text-xs text-gray-400">{pkg.version}</p>
                           {pkg.status === "quarantined" && (
-                            <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-medium">Quarantaine</span>
+                            <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium">Quarantaine</span>
                           )}
                           {pkg.status === "pending_review" && (
                             <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">En révision</span>
@@ -1247,6 +1934,12 @@ function CvePostureSection({ onDecideRequest }) {
                           {pkg.status === "superseded" && (
                             <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded font-medium" title="Une version plus récente est déjà validée et publiée dans le dépôt">Remplacé</span>
                           )}
+                          {decisFilter === "queue" && (
+                            <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded font-medium font-mono ml-1" title="Score de risque (sévérité + KEV + EPSS + exposition parc)">
+                              Risque {pkg.risk_score}
+                            </span>
+                          )}
+                          <InstallBadge count={pkg.install_count} clients={pkg.install_clients} />
                         </div>
                       </td>
 
@@ -1716,7 +2409,7 @@ export default function SecurityPage() {
               step: "2",
               name: "Provenance SHA256",
               desc: "Comparaison du SHA256 du fichier téléchargé avec celui stocké dans Packages.gz. Protège contre les attaques man-in-the-middle.",
-              color: "bg-purple-100 text-purple-700",
+              color: "bg-blue-100 text-blue-700",
               blocking: true,
             },
             {

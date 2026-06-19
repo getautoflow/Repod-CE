@@ -309,6 +309,8 @@ const PAGE_TITLES = {
   "/supervision":   { label: "Supervision",         icon: "Health"       },
   "/logs":          { label: "Logs système",        icon: "Logs"         },
   "/dockerfile":    { label: "Analyseur Dockerfile", icon: "Dockerfile"   },
+  "/groups":        { label: "Groupes",             icon: "Users"        },
+  "/roles":         { label: "Rôles",               icon: "Shield"       },
 };
 
 // Section d'appartenance de chaque page (pour le breadcrumb)
@@ -328,6 +330,8 @@ const PAGE_SECTION = {
   "/users":         "Administration",
   "/settings":      "Administration",
   "/logs":          "Administration",
+  "/groups":        "Administration",
+  "/roles":         "Administration",
 };
 
 // ─── Séparateur de section ─────────────────────────────────────────────────────
@@ -349,6 +353,45 @@ function NavSection({ label, perms = [], collapsed = false }) {
   );
 }
 
+
+// ─── Groupe de navigation (dropdown cliquable avec chevron) ───────────────────
+function NavGroup({ label, paths = [], children, collapsed = false }) {
+  const location = useLocation();
+  const isActive = paths.some(p => location.pathname === p || location.pathname.startsWith(p + "/"));
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    if (isActive) setOpen(true);
+  }, [isActive]);
+
+  if (collapsed) {
+    return (
+      <>
+        <div className="mx-3 my-2 h-px bg-navy-700/70" />
+        {children}
+      </>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center w-full gap-1.5 px-3 pt-3.5 pb-1 text-[9.5px] font-bold tracking-[0.12em] uppercase text-navy-400 hover:text-slate-300 transition-colors select-none"
+      >
+        <span className="flex-1 text-left">{label}</span>
+        <svg
+          className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? "rotate-0" : "-rotate-90"}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && <div className="space-y-px">{children}</div>}
+    </div>
+  );
+}
+
 // ─── Item de navigation ───────────────────────────────────────────────────────
 // perm    : clé PERMISSIONS — si absent, visible par tous
 // collapsed : booléen pour le mode sidebar réduite
@@ -367,7 +410,7 @@ function NavItem({ to, end, icon, label, badge, perm, collapsed = false }) {
             collapsed ? "px-0 py-2.5 justify-center w-full" : "gap-3 px-3 py-2.5"
           } ${
             isActive
-              ? "bg-violet-600/[0.12] text-white"
+              ? "bg-blue-600/[0.12] text-white"
               : "text-slate-400 hover:bg-navy-800 hover:text-slate-200"
           }`
         }
@@ -376,7 +419,7 @@ function NavItem({ to, end, icon, label, badge, perm, collapsed = false }) {
           <>
             {/* Icône */}
             <span className={`w-4 h-4 shrink-0 transition-colors ${
-              isActive ? "text-violet-400" : "text-slate-500 group-hover/navitem:text-slate-300"
+              isActive ? "text-blue-400" : "text-slate-500 group-hover/navitem:text-slate-300"
             }`}>
               {icon}
             </span>
@@ -717,32 +760,38 @@ export default function DashboardLayout() {
 
           <NavItem to="/" end icon={<Icon.Dashboard />} label="Tableau de bord" collapsed={collapsed} />
 
-          {/* ── Section Dépôt ── */}
-          <NavSection label="Dépôt" perms={[null, "nav_upload", "nav_import", null]} collapsed={collapsed} />
-          <NavItem to="/packages"      icon={<Icon.Package />}     label="Paquets"           collapsed={collapsed} />
-          <NavItem to="/upload"        icon={<Icon.Upload />}       label="Déposer"           perm="nav_upload"   collapsed={collapsed} />
-          <NavItem to="/import"        icon={<Icon.Import />}       label="Importer"          perm="nav_import"   collapsed={collapsed} />
-          <NavItem to="/sources"       icon={<Icon.Sources />}      label="Sources"           perm="nav_import"   collapsed={collapsed} />
-          <NavItem to="/dockerfile"    icon={<Icon.Dockerfile />}   label="Analyseur Docker"  perm="nav_import"   collapsed={collapsed} />
-          <NavItem to="/distributions" icon={<Icon.Distribution />} label="Distributions"                         collapsed={collapsed} />
+          {/* ── Groupe Dépôt ── */}
+          <NavGroup label="Dépôt" paths={["/packages","/upload","/import","/sources","/dockerfile","/distributions"]} collapsed={collapsed}>
+            <NavItem to="/packages"      icon={<Icon.Package />}     label="Paquets"           collapsed={collapsed} />
+            <NavItem to="/upload"        icon={<Icon.Upload />}       label="Déposer"           perm="nav_upload"   collapsed={collapsed} />
+            <NavItem to="/import"        icon={<Icon.Import />}       label="Importer"          perm="nav_import"   collapsed={collapsed} />
+            <NavItem to="/sources"       icon={<Icon.Sources />}      label="Sources"           perm="nav_import"   collapsed={collapsed} />
+            <NavItem to="/dockerfile"    icon={<Icon.Dockerfile />}   label="Analyseur Docker"  perm="nav_import"   collapsed={collapsed} />
+            <NavItem to="/distributions" icon={<Icon.Distribution />} label="Distributions"                         collapsed={collapsed} />
+          </NavGroup>
 
-          {/* ── Section Sécurité ── */}
-          <NavSection label="Sécurité" perms={["nav_security", "nav_audit"]} collapsed={collapsed} />
-          <NavItem to="/security"   icon={<Icon.CveDecision />} label="Décisions CVE"   perm="nav_security" collapsed={collapsed} />
-          <NavItem to="/promotions" icon={<Icon.Promotion />}   label="Promotions"      perm="nav_security" badge={pendingCount || 0} collapsed={collapsed} />
-          <NavItem to="/audit"      icon={<Icon.Audit />}       label="Journal d'audit" perm="nav_audit"    collapsed={collapsed} />
+          {/* ── Groupe Sécurité ── */}
+          <NavGroup label="Sécurité" paths={["/security","/promotions","/audit"]} collapsed={collapsed}>
+            <NavItem to="/security"   icon={<Icon.CveDecision />} label="Décisions CVE"   perm="nav_security" collapsed={collapsed} />
+            <NavItem to="/promotions" icon={<Icon.Promotion />}   label="Promotions"      perm="nav_security" badge={pendingCount || 0} collapsed={collapsed} />
+            <NavItem to="/audit"      icon={<Icon.Audit />}       label="Journal d'audit" perm="nav_audit"    collapsed={collapsed} />
+          </NavGroup>
 
-          {/* ── Section Clients ── */}
-          <NavSection label="Clients" perms={[null]} collapsed={collapsed} />
-          <NavItem to="/setup"     icon={<Icon.ClientSetup />} label="Configuration"    collapsed={collapsed} />
+          {/* ── Groupe Clients ── */}
+          <NavGroup label="Clients" paths={["/setup"]} collapsed={collapsed}>
+            <NavItem to="/setup"     icon={<Icon.ClientSetup />} label="Configuration"    collapsed={collapsed} />
+          </NavGroup>
 
-          {/* ── Section Administration ── */}
-          <NavSection label="Administration" perms={["nav_downloads","nav_health","nav_users","nav_settings"]} collapsed={collapsed} />
-          <NavItem to="/downloads" icon={<Icon.Download />} label="Téléchargements"  perm="nav_downloads" collapsed={collapsed} />
-          <NavItem to="/supervision" icon={<Icon.Health />}   label="Supervision"       perm="nav_health"    collapsed={collapsed} />
-          <NavItem to="/logs"      icon={<Icon.Logs />}     label="Logs système"      perm="nav_settings"  collapsed={collapsed} />
-          <NavItem to="/users"     icon={<Icon.Users />}    label="Utilisateurs"      perm="nav_users"     collapsed={collapsed} />
-          <NavItem to="/settings"  icon={<Icon.Settings />} label="Paramètres"        perm="nav_settings"  collapsed={collapsed} />
+          {/* ── Groupe Administration ── */}
+          <NavGroup label="Administration" paths={["/downloads","/supervision","/logs","/users","/groups","/roles","/settings"]} collapsed={collapsed}>
+            <NavItem to="/downloads"   icon={<Icon.Download />} label="Téléchargements"   perm="nav_downloads" collapsed={collapsed} />
+            <NavItem to="/supervision" icon={<Icon.Health />}   label="Supervision"       perm="nav_health"    collapsed={collapsed} />
+            <NavItem to="/logs"        icon={<Icon.Logs />}     label="Logs système"      perm="nav_settings"  collapsed={collapsed} />
+            <NavItem to="/users"       icon={<Icon.Users />}    label="Utilisateurs"      perm="nav_users"     collapsed={collapsed} />
+            <NavItem to="/groups"      icon={<Icon.Group />}    label="Groupes"           perm="nav_users"     collapsed={collapsed} />
+            <NavItem to="/roles"       icon={<Icon.Shield />}   label="Rôles"             perm="nav_users"     collapsed={collapsed} />
+            <NavItem to="/settings"    icon={<Icon.Settings />} label="Paramètres"        perm="nav_settings"  collapsed={collapsed} />
+          </NavGroup>
         </nav>
 
         {/* ── Bouton collapse (avant le footer) ── */}
@@ -773,7 +822,7 @@ export default function DashboardLayout() {
                         ${collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-3 py-2"}`}
           >
             {/* Avatar */}
-            <div className="w-7 h-7 rounded-full bg-navy-700 border border-navy-600 flex items-center justify-center shrink-0 group-hover:border-violet-500/50 transition-colors">
+            <div className="w-7 h-7 rounded-full bg-navy-700 border border-navy-600 flex items-center justify-center shrink-0 group-hover:border-blue-500/50 transition-colors">
               <span className="text-xs font-bold text-slate-300">{userInitial}</span>
             </div>
             {/* Infos (masquées en mode collapsed) */}

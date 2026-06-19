@@ -23,6 +23,8 @@ import AuditPage from "./pages/AuditPage";
 import LogsPage from "./pages/LogsPage";
 import DockerfilePage from "./pages/DockerfilePage";
 import PromotionsPage from "./pages/PromotionsPage";
+import GroupsPage from "./pages/GroupsPage";
+import RolesPage from "./pages/RolesPage";
 
 export default function App() {
   return (
@@ -60,6 +62,8 @@ export default function App() {
             <Route path="logs"        element={<LogsPage />} />
             <Route path="dockerfile"  element={<DockerfilePage />} />
             <Route path="promotions"  element={<PromotionsPage />} />
+            <Route path="groups"       element={<GroupsPage />} />
+            <Route path="roles"        element={<RolesPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

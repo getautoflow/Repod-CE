@@ -8,6 +8,7 @@ Couvre, via FastAPI TestClient, les trois routers identifiés comme
 prioritaires pour la couverture (tâche "long terme") :
 
   - routers/upload.py             → POST /upload/ (validations, pipeline, doublons)
+  - routers/install_router.py     → /install/search, /install/jobs/*
   - routers/security_router.py    → agrégat cve_router + decision_router + scan_router
 
 Approche :
@@ -16,7 +17,7 @@ Approche :
   - Les opérations système (subprocess, SSH, reprepro, grype, notifications)
     sont mockées — seule la logique HTTP/métier du router est exercée.
   - Quelques tests RBAC utilisent de vrais JWT (auth.jwt) sans override pour
-    vérifier que get_maintainer_user / get_admin_user
+    vérifier que get_maintainer_user / get_admin_user / get_auditor_user
     rejettent correctement les rôles insuffisants (403).
 """
 
@@ -34,6 +35,7 @@ os.environ.setdefault("STAGING_INCOMING",   os.path.join(_TMP, "staging", "incom
 os.environ.setdefault("STAGING_QUARANTINE", os.path.join(_TMP, "staging", "quarantine"))
 os.environ.setdefault("INDEX_PATH",         os.path.join(_TMP, "index.json"))
 os.environ.setdefault("AUDIT_DIR",          _TMP)
+os.environ.setdefault("INVENTORY_DB",       os.path.join(_TMP, "inv.db"))
 os.environ.setdefault("SECURITY_CACHE_DIR", os.path.join(_TMP, "security"))
 os.environ.setdefault("JWT_SECRET_KEY",     "test-secret-router-integration")
 
@@ -47,15 +49,18 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from slowapi.errors import RateLimitExceeded
 
+import routers.install_router as install_mod
 import routers.security_common as security_common
 import routers.upload as upload_mod
 import services.indexer as indexer_mod
 from auth.dependencies import (
     get_admin_user,
+    get_auditor_user,
     get_current_user,
     get_maintainer_user,
     get_uploader_user,
 )
+from services.leader_election import require_leader
 from auth.jwt import create_access_token
 from limiter import limiter
 from routers.security_router import router as security_router
@@ -96,6 +101,14 @@ sec_client = _make_app(security_router, _sec_overrides)
 # Upload : utilisateur "uploader_bob"
 # `upload_mod` est déjà l'APIRouter lui-même (cf. note ci-dessus).
 upload_client = _make_app(upload_mod, {get_uploader_user: "uploader_bob"}, with_limiter=True)
+
+# Install : utilisateur "maintainer_alice"
+_install_overrides = {
+    get_maintainer_user: "maintainer_alice",
+    get_auditor_user:    "maintainer_alice",
+    require_leader:      None,  # Pas de leader election en tests
+}
+install_client = _make_app(install_mod.router, _install_overrides)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -226,6 +239,44 @@ class TestSecurityCveRouter:
 
 class TestSecurityDecisionRouter:
 
+    def test_list_decisions_empty(self):
+        with patch("routers.decision_router.list_all_decisions", return_value=[]):
+            r = sec_client.get("/security/decisions")
+        assert r.status_code == 200
+        assert r.json() == {"decisions": [], "count": 0}
+
+    def test_list_decisions_enriched(self):
+        decisions = [
+            {
+                "package": "dec-list-pkg", "version": "1.0.0", "arch": "amd64",
+                "action": "upgrade_required", "status": "upgrade_required",
+                "justification": "à corriger", "decided_by": "rssi@company.com",
+                "decided_at": "2026-01-01T00:00:00+00:00",
+                "expires_at": None, "expires_in_days": None,
+                "target_version": "1.0.1", "cve_ids": ["CVE-2026-1111"],
+            },
+            {
+                "package": "dec-list-pkg2", "version": "1.0.0", "arch": "amd64",
+                "action": "accept_risk", "status": "accepted_risk",
+                "justification": "risque accepté", "decided_by": "rssi@company.com",
+                "decided_at": "2026-02-01T00:00:00+00:00",
+                "expires_at": "2026-03-01T00:00:00+00:00", "expires_in_days": 30,
+                "target_version": None, "cve_ids": [],
+            },
+        ]
+        with patch("routers.decision_router.list_all_decisions", return_value=decisions), \
+             patch("services.compliance_engine._find_patch_in_depot",
+                   return_value={"available": True, "depot_version": "1.0.1"}):
+            r = sec_client.get("/security/decisions")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["count"] == 2
+        # Tri par decided_at décroissant → accept_risk (02) avant upgrade_required (01)
+        assert body["decisions"][0]["package"] == "dec-list-pkg2"
+        assert body["decisions"][0]["sla"]["has_sla"] is True
+        upgrade_entry = next(d for d in body["decisions"] if d["package"] == "dec-list-pkg")
+        assert upgrade_entry["patch_status"] == {"available": True, "depot_version": "1.0.1"}
+
     def test_get_decision_not_found(self):
         r = sec_client.get("/security/packages/missing-pkg/1.0.0/decision")
         assert r.status_code == 404
@@ -255,7 +306,9 @@ class TestSecurityDecisionRouter:
         assert r.status_code == 400
 
     def test_decide_package_not_in_review(self):
-        _seed_manifest(name="dec-pkg4", version="1.0.0", status="validated")
+        # Les paquets "validated" acceptent désormais les décisions CVE (fix 1c48956).
+        # Le 409 est retourné uniquement pour les statuts vraiment invalides.
+        _seed_manifest(name="dec-pkg4", version="1.0.0", status="quarantined")
         r = sec_client.post(
             "/security/packages/dec-pkg4/1.0.0/decide",
             json={"action": "accept_risk", "justification": "validé manuellement"},
@@ -265,7 +318,9 @@ class TestSecurityDecisionRouter:
     def test_decide_accept_risk_success(self):
         _seed_manifest(name="dec-pkg5", version="1.0.0", status="pending_review",
                         cve_results=[{"id": "CVE-2026-3333", "severity": "High"}])
-        with patch("routers.decision_router.subprocess.run") as mock_run:
+        with patch("routers.decision_router.subprocess.run") as mock_run, \
+             patch("routers.decision_router.notify_decision") as mock_notify, \
+             patch("routers.decision_router.notify_decision_email") as mock_email:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             r = sec_client.post(
                 "/security/packages/dec-pkg5/1.0.0/decide",
@@ -275,6 +330,8 @@ class TestSecurityDecisionRouter:
         body = r.json()
         assert body["status"] == "ok"
         assert body["new_status"] == "accepted_risk"
+        mock_notify.assert_called_once()
+        mock_email.assert_called_once()
 
     def test_decide_reject_moves_to_quarantine(self):
         manifest = _seed_manifest(name="dec-pkg6", version="1.0.0", status="pending_review",
@@ -285,7 +342,9 @@ class TestSecurityDecisionRouter:
         pkg_file = pool_dir / manifest["filename"]
         pkg_file.write_bytes(b"fake-deb-content")
 
-        with patch("routers.decision_router._repo_remove_package") as mock_remove:
+        with patch("routers.decision_router._repo_remove_package") as mock_remove, \
+             patch("routers.decision_router.notify_decision"), \
+             patch("routers.decision_router.notify_decision_email"):
             r = sec_client.post(
                 "/security/packages/dec-pkg6/1.0.0/decide",
                 json={"action": "reject", "justification": "CVE critique non corrigée"},
@@ -498,7 +557,8 @@ class TestUploadRouter:
              patch.object(upload_module, "save_manifest"), \
              patch.object(upload_module, "add_to_index"), \
              patch.object(upload_module, "_add_to_repo", return_value=True) as mock_add_repo, \
-             patch.object(upload_module, "notify"):
+             patch.object(upload_module, "notify_pending_review"), \
+             patch.object(upload_module, "notify_pending_review_email"):
             r = upload_client.post(
                 "/upload/",
                 data={"distribution": "jammy"},
@@ -555,3 +615,132 @@ class TestUploadRouter:
         )
         assert r.status_code == 403
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Install router
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestInstallRouter:
+
+    def test_search_empty_index(self):
+        r = install_client.get("/install/search")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["packages"] == []
+        assert body["total"] == 0
+
+    def test_search_with_index(self):
+        import json as _json
+        index = {
+            "packages": {
+                "nginx_1.24.0_amd64": {
+                    "description": "HTTP server",
+                    "section": "web",
+                    "versions": {
+                        "1.24.0": {
+                            "distribution": "jammy", "arch": "amd64",
+                            "size_bytes": 12345, "imported_at": "2026-01-01T00:00:00Z",
+                            "status": "validated",
+                        }
+                    },
+                }
+            }
+        }
+        indexer_mod.INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(indexer_mod.INDEX_PATH, "w") as f:
+            _json.dump(index, f)
+
+        r = install_client.get("/install/search", params={"q": "nginx"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 1
+        assert body["packages"][0]["install_name"] == "nginx"
+        assert "jammy" in body["packages"][0]["distributions"]
+
+    def test_create_job_unknown_package(self):
+        r = install_client.post(
+            "/install/jobs",
+            json={"package_name": "totally-unknown-pkg", "target_ids": ["client-1"]},
+        )
+        assert r.status_code == 404
+
+    def test_create_job_invalid_package_name(self):
+        r = install_client.post(
+            "/install/jobs",
+            json={"package_name": "Invalid Name!", "target_ids": ["client-1"]},
+        )
+        assert r.status_code == 422
+
+    def test_create_job_success(self):
+        with patch("services.indexer.list_packages_from_index",
+                   return_value=[{"name": "nginx"}]), \
+             patch.object(install_mod, "_do_install"):
+            r = install_client.post(
+                "/install/jobs",
+                json={"package_name": "nginx", "target_ids": ["client-1"]},
+            )
+        assert r.status_code == 202
+        body = r.json()
+        assert body["package_name"] == "nginx"
+        assert body["target_ids"] == ["client-1"]
+        # _do_install est planifié en BackgroundTask — peut avoir été appelé
+        # de façon synchrone par TestClient ; dans tous les cas pas d'exception.
+
+    def test_list_jobs(self):
+        r = install_client.get("/install/jobs")
+        assert r.status_code == 200
+        body = r.json()
+        assert "jobs" in body
+        assert "active_count" in body
+
+    def test_get_job_not_found(self):
+        r = install_client.get("/install/jobs/does-not-exist")
+        assert r.status_code == 404
+
+    def test_get_job_found(self):
+        with patch("services.indexer.list_packages_from_index",
+                   return_value=[{"name": "nginx"}]), \
+             patch.object(install_mod, "_do_install"):
+            create_resp = install_client.post(
+                "/install/jobs",
+                json={"package_name": "nginx", "target_ids": ["client-1"]},
+            )
+        job_id = create_resp.json()["job_id"]
+        r = install_client.get(f"/install/jobs/{job_id}")
+        assert r.status_code == 200
+        assert r.json()["job_id"] == job_id
+
+    def test_confirm_job_not_confirming(self):
+        with patch("services.indexer.list_packages_from_index",
+                   return_value=[{"name": "nginx"}]), \
+             patch.object(install_mod, "_do_install"):
+            create_resp = install_client.post(
+                "/install/jobs",
+                json={"package_name": "nginx", "target_ids": ["client-1"]},
+            )
+        job_id = create_resp.json()["job_id"]
+        r = install_client.post(f"/install/jobs/{job_id}/confirm")
+        assert r.status_code == 400
+
+    def test_cancel_unknown_job(self):
+        r = install_client.post("/install/jobs/does-not-exist/cancel")
+        assert r.status_code == 400
+
+    def test_search_rbac_requires_auditor(self):
+        app = FastAPI()
+        app.include_router(install_mod.router)
+        client = TestClient(app, raise_server_exceptions=False)
+        # Token sans rôle valide (role inconnu) → 403
+        r = client.get("/install/search", headers=_role_headers("guest"))
+        assert r.status_code == 403
+
+    def test_create_job_rbac_requires_maintainer(self):
+        app = FastAPI()
+        app.include_router(install_mod.router)
+        client = TestClient(app, raise_server_exceptions=False)
+        r = client.post(
+            "/install/jobs",
+            json={"package_name": "nginx", "target_ids": ["client-1"]},
+            headers=_role_headers("auditor"),
+        )
+        assert r.status_code == 403

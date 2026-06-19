@@ -1,10 +1,10 @@
 """
 Module : test_security_decisions.py
-Rôle   : P1-B — Tests des décisions de sécurité RSSI
+Rôle   : Tests des décisions de sécurité RSSI (stockage PostgreSQL/SQLite).
          Vérifie save_decision(), load_decision(), delete_decision(),
          list_all_decisions(), is_decision_expired(), get_sla_status().
 
-Dépend : pytest
+Dépend : pytest, conftest.db_test_engine (SQLite in-memory)
 """
 
 # ── Env avant tout import ─────────────────────────────────────────────────────
@@ -12,21 +12,14 @@ import os
 import tempfile as _tmp_mod
 
 _TMP = _tmp_mod.mkdtemp(prefix="repod_decisions_test_")
-os.environ["SECURITY_CACHE_DIR"] = _TMP
+os.environ.setdefault("SECURITY_CACHE_DIR", _TMP)
 os.environ.setdefault("MANIFEST_DIR", _TMP)
 os.environ.setdefault("POOL_DIR",     _TMP)
 
 # ── Imports normaux ────────────────────────────────────────────────────────────
-import json
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 import pytest
-
-import services.security_decisions as sd_mod
-# Rediriger le module vers notre répertoire temp
-sd_mod.DECISIONS_DIR = Path(_TMP) / "decisions"
-sd_mod.DECISIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 from services.security_decisions import (
     save_decision,
@@ -40,15 +33,17 @@ from services.security_decisions import (
 )
 
 
-# ── Fixture : nettoyage avant chaque test ────────────────────────────────────
+# ── Fixture : nettoyage avant chaque test ─────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def clean_decisions():
-    for f in sd_mod.DECISIONS_DIR.glob("*.json"):
-        f.unlink(missing_ok=True)
+def clean_decisions(db_test_engine):
+    """Vide la table decision_records avant et après chaque test."""
+    from sqlalchemy import text
+    with db_test_engine.begin() as c:
+        c.execute(text("DELETE FROM decision_records"))
     yield
-    for f in sd_mod.DECISIONS_DIR.glob("*.json"):
-        f.unlink(missing_ok=True)
+    with db_test_engine.begin() as c:
+        c.execute(text("DELETE FROM decision_records"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -78,19 +73,6 @@ class TestSaveDecision:
                     "justification", "decided_by", "decided_at"):
             assert key in dec, f"Clé manquante : {key!r}"
 
-    def test_file_created_on_disk(self):
-        """Un fichier JSON est créé dans DECISIONS_DIR."""
-        _save(name="curl", version="7.88.0")
-        files = list(sd_mod.DECISIONS_DIR.glob("*.json"))
-        assert len(files) == 1
-
-    def test_file_content_is_valid_json(self):
-        """Le fichier créé est du JSON valide."""
-        _save(name="curl", version="7.88.0")
-        path = next(sd_mod.DECISIONS_DIR.glob("*.json"))
-        data = json.loads(path.read_text())
-        assert data["package"] == "curl"
-
     def test_action_maps_to_correct_status(self):
         """Chaque action produit le statut de manifest correspondant."""
         for action, expected_status in ACTION_TO_STATUS.items():
@@ -98,7 +80,6 @@ class TestSaveDecision:
             assert dec["status"] == expected_status, (
                 f"action={action!r} → attendu={expected_status!r}, obtenu={dec['status']!r}"
             )
-            # Nettoyer entre les assertions
             delete_decision("nginx", "1.24.0", "amd64")
 
     def test_invalid_action_raises_value_error(self):
@@ -117,7 +98,6 @@ class TestSaveDecision:
         exp = datetime.fromisoformat(dec["expires_at"])
         now = datetime.now(timezone.utc)
         assert exp > now
-        # Environ 30 jours dans le futur (±1 jour de tolérance)
         delta = (exp - now).days
         assert 28 <= delta <= 31
 
@@ -140,9 +120,11 @@ class TestSaveDecision:
         _save(action="accept_risk")
         _save(action="reject")
         dec = load_decision("nginx", "1.24.0", "amd64")
+        assert dec is not None
         assert dec["action"] == "reject"
-        # Un seul fichier
-        assert len(list(sd_mod.DECISIONS_DIR.glob("*.json"))) == 1
+        # Une seule entrée en base
+        all_dec = list_all_decisions()
+        assert len(all_dec) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -165,11 +147,12 @@ class TestLoadDecision:
         assert dec["package"] == "vim"
 
     def test_version_with_colon_handled(self):
-        """Les ':' dans la version sont remplacés par '_' dans le nom de fichier."""
+        """Les versions avec ':' (époch RPM/deb) sont stockées correctement."""
         _save(name="epoch_pkg", version="1:2.0.0", action="accept_risk",
               justification="epoch test", decided_by="admin")
         dec = load_decision("epoch_pkg", "1:2.0.0", "amd64")
         assert dec is not None
+        assert dec["version"] == "1:2.0.0"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -179,7 +162,7 @@ class TestLoadDecision:
 class TestDeleteDecision:
 
     def test_returns_true_when_deleted(self):
-        """Retourne True si le fichier existait et a été supprimé."""
+        """Retourne True si la décision existait et a été supprimée."""
         _save()
         assert delete_decision("nginx", "1.24.0", "amd64") is True
 
@@ -187,8 +170,8 @@ class TestDeleteDecision:
         """Retourne False si aucune décision à supprimer."""
         assert delete_decision("nonexistent", "1.0.0") is False
 
-    def test_file_removed_from_disk(self):
-        """Le fichier est bien supprimé du disque."""
+    def test_record_removed_from_db(self):
+        """La décision est bien supprimée de la base."""
         _save()
         delete_decision("nginx", "1.24.0", "amd64")
         assert load_decision("nginx", "1.24.0", "amd64") is None
@@ -200,8 +183,8 @@ class TestDeleteDecision:
 
 class TestListAllDecisions:
 
-    def test_empty_dir_returns_empty_list(self):
-        """Répertoire vide → liste vide."""
+    def test_empty_db_returns_empty_list(self):
+        """Aucune décision → liste vide."""
         assert list_all_decisions() == []
 
     def test_returns_all_saved_decisions(self):

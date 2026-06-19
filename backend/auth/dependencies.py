@@ -89,3 +89,24 @@ async def get_admin_user(token: str = Depends(oauth2_scheme)) -> str:
         ("admin",),
         "Accès réservé aux administrateurs.",
     )
+
+
+def get_user_role(username: str) -> str:
+    """Retourne le rôle d'un utilisateur (non-async, pour appels internes)."""
+    user = get_user(username)
+    return user.get("role", "reader") if user else "reader"
+
+
+def require_permission(perm: str):
+    """Factory de dépendance basée sur une permission granulaire."""
+    async def _dep(token: str = Depends(oauth2_scheme)) -> str:
+        from .roles import get_user_permissions
+        data = _parse_token(token)
+        perms = get_user_permissions(data["username"])
+        if perm not in perms:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission requise : {perm}",
+            )
+        return data["username"]
+    return _dep

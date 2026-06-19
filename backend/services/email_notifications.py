@@ -1,9 +1,10 @@
 """
-Service d'envoi d'emails via SMTP (settings.json → "email").
+Service de notifications email (SMTP).
 
-Utilisé pour les emails de réinitialisation de mot de passe
-(auth/router.py:forgot_password) et le test de configuration SMTP
-(routers/settings_router.py:test_email).
+Envoie des alertes par email pour :
+  - notify_pending_review_email  : paquet en révision RSSI
+  - notify_sla_expiring_email    : décisions CVE expirantes (SLA J-7)
+  - notify_decision_email        : confirmation décision RSSI
 
 Configuration dans settings.json → "email" :
   {
@@ -163,6 +164,236 @@ def _base_style() -> str:
              text-decoration: none; font-size: 14px; font-weight: 600; }
     </style>
     """
+
+
+# ─── Notifications ────────────────────────────────────────────────────────────
+
+def notify_pending_review_email(
+    package: str,
+    version: str,
+    arch: str,
+    distribution: str,
+    cve_counts: dict,
+    worst_severity: str | None,
+    kev_count: int = 0,
+) -> bool:
+    sev_badge = {
+        "Critical": "badge-red",
+        "High":     "badge-orange",
+        "Medium":   "badge-amber",
+        "Low":      "badge-blue",
+    }.get(worst_severity, "badge-blue")
+
+    cve_rows = "".join(
+        f"<tr><td class='mono'>{s.capitalize()}</td><td><strong>{n}</strong></td></tr>"
+        for s, n in cve_counts.items() if n > 0
+    )
+    kev_block = (
+        f"<div style='background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;"
+        f"padding:10px 14px;margin-top:12px;color:#dc2626;font-size:13px;'>"
+        f"⚠️ <strong>{kev_count} CVE activement exploitée(s)</strong> dans le catalogue KEV CISA</div>"
+    ) if kev_count else ""
+
+    html = f"""<!DOCTYPE html><html><head>{_base_style()}</head><body>
+    <div class='card'>
+      <div class='header'>
+        <h1>⏳ Paquet en attente de révision RSSI</h1>
+        <p>{datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+      </div>
+      <div class='body'>
+        <p>Le paquet suivant a été importé mais nécessite une <strong>décision RSSI</strong>
+           avant d'être publié dans le dépôt APT :</p>
+        <table class='table'>
+          <tr><th>Paquet</th><td class='mono'><strong>{package}</strong></td></tr>
+          <tr><th>Version</th><td class='mono'>{version}</td></tr>
+          <tr><th>Architecture</th><td>{arch}</td></tr>
+          <tr><th>Distribution</th><td>{distribution}</td></tr>
+          <tr><th>Sévérité max</th>
+              <td><span class='badge {sev_badge}'>{worst_severity or "?"}</span></td></tr>
+        </table>
+        <table class='table' style='margin-top:12px'>
+          <tr><th>Sévérité</th><th>Nb CVE</th></tr>
+          {cve_rows or "<tr><td colspan='2'>Aucune CVE détectée</td></tr>"}
+        </table>
+        {kev_block}
+        <a href='#' class='btn'>Accéder à la file de révision →</a>
+      </div>
+      <div class='footer'>Notification automatique — repod APT Repository Manager</div>
+    </div></body></html>"""
+
+    text = (
+        f"Paquet en attente de révision RSSI\n"
+        f"Paquet : {package} {version} ({arch}, {distribution})\n"
+        f"Sévérité max : {worst_severity}\n"
+        f"CVE : {', '.join(f'{s}={n}' for s, n in cve_counts.items() if n > 0)}\n"
+        + (f"⚠ {kev_count} CVE dans KEV CISA\n" if kev_count else "")
+    )
+
+    return _send_email(
+        f"Révision RSSI requise — {package} {version}",
+        html, text
+    )
+
+
+def notify_sla_expiring_email(expiring: list[dict]) -> bool:
+    if not expiring:
+        return False
+
+    action_labels = {
+        "accept_risk":      "Risque accepté",
+        "exception":        "Exception",
+        "upgrade_required": "Upgrade requis",
+    }
+
+    rows = ""
+    for d in expiring:
+        days = d.get("remaining_days", 0)
+        if days < 0:
+            status_cell = "<span class='badge badge-red'>Expirée</span>"
+        elif days == 0:
+            status_cell = "<span class='badge badge-red'>Expire aujourd'hui</span>"
+        elif days <= 3:
+            status_cell = f"<span class='badge badge-red'>J-{days}</span>"
+        else:
+            status_cell = f"<span class='badge badge-amber'>J-{days}</span>"
+
+        rows += (
+            f"<tr><td class='mono'>{d['package']} {d.get('version','')}</td>"
+            f"<td>{action_labels.get(d.get('action',''), d.get('action',''))}</td>"
+            f"<td>{d.get('decided_by','?')}</td>"
+            f"<td>{status_cell}</td></tr>"
+        )
+
+    html = f"""<!DOCTYPE html><html><head>{_base_style()}</head><body>
+    <div class='card'>
+      <div class='header'>
+        <h1>⏰ Décisions CVE expirantes</h1>
+        <p>{len(expiring)} décision(s) à renouveler</p>
+      </div>
+      <div class='body'>
+        <p>Les décisions RSSI suivantes expirent bientôt ou sont déjà expirées.
+           Les paquets expirés repasseront automatiquement en file de révision.</p>
+        <table class='table'>
+          <tr><th>Paquet</th><th>Décision</th><th>Décidé par</th><th>SLA</th></tr>
+          {rows}
+        </table>
+        <a href='#' class='btn'>Gérer les décisions →</a>
+      </div>
+      <div class='footer'>Notification automatique — repod APT Repository Manager</div>
+    </div></body></html>"""
+
+    text = "Décisions CVE expirantes :\n" + "\n".join(
+        f"  • {d['package']} {d.get('version','')} — {action_labels.get(d.get('action',''), '')} — J-{d.get('remaining_days',0)}"
+        for d in expiring
+    )
+
+    return _send_email(
+        f"SLA CVE — {len(expiring)} décision(s) expirante(s)",
+        html, text
+    )
+
+
+def notify_decision_email(
+    package: str,
+    version: str,
+    action: str,
+    decided_by: str,
+    justification: str,
+    expires_in_days: int | None = None,
+) -> bool:
+    action_labels = {
+        "accept_risk":      ("✅ Risque accepté",     "badge-green"),
+        "exception":        ("🔓 Exception accordée", "badge-blue"),
+        "reject":           ("🚫 Rejeté",             "badge-red"),
+        "upgrade_required": ("🔼 Upgrade requis",     "badge-amber"),
+    }
+    label, badge = action_labels.get(action, (action, "badge-blue"))
+
+    expire_row = (
+        f"<tr><th>Expiration SLA</th><td>Dans <strong>{expires_in_days} jours</strong></td></tr>"
+        if expires_in_days else ""
+    )
+
+    html = f"""<!DOCTYPE html><html><head>{_base_style()}</head><body>
+    <div class='card'>
+      <div class='header'>
+        <h1>Décision RSSI enregistrée</h1>
+        <p>{datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+      </div>
+      <div class='body'>
+        <table class='table'>
+          <tr><th>Paquet</th><td class='mono'><strong>{package} {version}</strong></td></tr>
+          <tr><th>Décision</th><td><span class='badge {badge}'>{label}</span></td></tr>
+          <tr><th>Décidé par</th><td>{decided_by}</td></tr>
+          {expire_row}
+          <tr><th>Justification</th><td style='font-size:13px'>{justification[:300]}</td></tr>
+        </table>
+      </div>
+      <div class='footer'>Notification automatique — repod APT Repository Manager</div>
+    </div></body></html>"""
+
+    text = (
+        f"Décision RSSI : {label}\n"
+        f"Paquet : {package} {version}\n"
+        f"Décidé par : {decided_by}\n"
+        f"Justification : {justification[:200]}\n"
+        + (f"Expire dans : {expires_in_days} jours\n" if expires_in_days else "")
+    )
+
+    return _send_email(
+        f"Décision RSSI — {package} {version} — {label}",
+        html, text
+    )
+
+
+def notify_patch_available_email(
+    package: str,
+    version: str,
+    target_version: str,
+    depot_version: str,
+    clients: list[dict],
+    app_url: str = "",
+) -> bool:
+    """Notifie qu'un correctif demandé par le RSSI est disponible dans le dépôt."""
+    rows = "".join(
+        f"<tr><td>{c.get('label') or c['id']}</td></tr>" for c in clients[:20]
+    ) or "<tr><td>Aucune machine concernée</td></tr>"
+
+    deploy_row = ""
+    if app_url and clients:
+        client_ids = ",".join(str(c["id"]) for c in clients)
+        deploy_url = f"{app_url}/deploy?package={package}&clients={client_ids}"
+        deploy_row = f"<tr><th>Déployer</th><td><a href='{deploy_url}'>{deploy_url}</a></td></tr>"
+
+    html = f"""<!DOCTYPE html><html><head>{_base_style()}</head><body>
+    <div class='card'>
+      <div class='header'>
+        <h1>Correctif disponible</h1>
+        <p>{datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+      </div>
+      <div class='body'>
+        <table class='table'>
+          <tr><th>Paquet</th><td class='mono'><strong>{package} {version}</strong></td></tr>
+          <tr><th>Version cible</th><td class='mono'>{target_version}</td></tr>
+          <tr><th>Version disponible</th><td class='mono'><span class='badge badge-green'>{depot_version}</span></td></tr>
+          {deploy_row}
+        </table>
+        <p style='margin-top:14px;font-size:13px'>Machines exposées au paquet vulnérable ({len(clients)}) :</p>
+        <table class='table'>{rows}</table>
+      </div>
+      <div class='footer'>Notification automatique — repod APT Repository Manager</div>
+    </div></body></html>"""
+
+    text = (
+        f"Correctif disponible pour {package} {version} -> {target_version}\n"
+        f"Version dans le dépôt : {depot_version}\n"
+        f"Machines concernées : {len(clients)}\n"
+    )
+
+    return _send_email(
+        f"Correctif disponible — {package} {version}",
+        html, text
+    )
 
 
 def send_test_email(to_override: str | None = None) -> dict:

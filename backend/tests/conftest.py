@@ -28,6 +28,7 @@ def email_settings():
     """Settings complets avec email activé — port 587 (STARTTLS)."""
     return {
         "email":         _EMAIL_CFG_BASE.copy(),
+        "notifications": {"webhook_enabled": False, "webhook_url": ""},
         "app_url":       "http://localhost:3003",
     }
 
@@ -38,6 +39,7 @@ def email_settings_ssl():
     cfg = {**_EMAIL_CFG_BASE, "smtp_port": 465}
     return {
         "email":         cfg,
+        "notifications": {"webhook_enabled": False, "webhook_url": ""},
         "app_url":       "http://localhost:3003",
     }
 
@@ -81,7 +83,7 @@ def db_test_engine():
     sans nécessiter un serveur PostgreSQL.
 
     Tables créées : users, api_tokens, revoked_tokens, manifests, ssh_known_hosts,
-                    inventory_clients, packages, sync_status, sync_log,
+                    inventory_clients, inventory_packages, packages, sync_status, sync_log,
                     import_groups, import_group_files,
                     apk_packages, apk_sync_status.
     """
@@ -202,6 +204,16 @@ def db_test_engine():
             )
         """))
         c.execute(_t("""
+            CREATE TABLE inventory_packages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id   TEXT NOT NULL,
+                name        TEXT NOT NULL,
+                version     TEXT NOT NULL,
+                arch        TEXT,
+                scanned_at  TEXT NOT NULL
+            )
+        """))
+        c.execute(_t("""
             CREATE TABLE packages (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_id      TEXT NOT NULL,
@@ -295,6 +307,95 @@ def db_test_engine():
                 pkg_count  INTEGER DEFAULT 0,
                 status     TEXT DEFAULT 'never',
                 error      TEXT
+            )
+        """))
+        c.execute(_t("""
+            CREATE TABLE decision_records (
+                id                       TEXT PRIMARY KEY,
+                package                  TEXT NOT NULL,
+                version                  TEXT NOT NULL,
+                arch                     TEXT NOT NULL DEFAULT 'amd64',
+                action                   TEXT NOT NULL,
+                status                   TEXT NOT NULL,
+                justification            TEXT NOT NULL DEFAULT '',
+                decided_by               TEXT NOT NULL,
+                decided_at               TEXT NOT NULL,
+                expires_at               TEXT,
+                expires_in_days          INTEGER,
+                target_version           TEXT,
+                cve_ids                  TEXT NOT NULL DEFAULT '[]',
+                assigned_to              TEXT,
+                assigned_to_type         TEXT,
+                assigned_at              TEXT,
+                patch_available_notified INTEGER NOT NULL DEFAULT 0,
+                resolved_at              TEXT,
+                resolved_by              TEXT,
+                resolution_note          TEXT,
+                UNIQUE (package, version, arch)
+            )
+        """))
+        c.execute(_t("""
+            CREATE TABLE client_decision_records (
+                id               TEXT PRIMARY KEY,
+                source           TEXT NOT NULL DEFAULT 'compliance',
+                package          TEXT NOT NULL,
+                version          TEXT NOT NULL,
+                arch             TEXT NOT NULL DEFAULT 'x86_64',
+                distro_family    TEXT NOT NULL DEFAULT '',
+                action           TEXT NOT NULL,
+                justification    TEXT NOT NULL DEFAULT '',
+                decided_by       TEXT NOT NULL,
+                decided_at       TEXT NOT NULL,
+                expires_at       TEXT,
+                expires_in_days  INTEGER,
+                target_version   TEXT,
+                cve_ids          TEXT NOT NULL DEFAULT '[]',
+                client_ids       TEXT NOT NULL DEFAULT '[]',
+                hostnames        TEXT NOT NULL DEFAULT '[]',
+                assigned_to      TEXT,
+                assigned_to_type TEXT,
+                assigned_at      TEXT,
+                resolved_at      TEXT,
+                resolved_by      TEXT,
+                resolve_note     TEXT
+            )
+        """))
+        c.execute(_t("""
+            CREATE TABLE groups (
+                id          TEXT PRIMARY KEY,
+                name        TEXT UNIQUE NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                color       TEXT NOT NULL DEFAULT 'blue',
+                created_at  TEXT NOT NULL,
+                created_by  TEXT NOT NULL
+            )
+        """))
+        c.execute(_t("""
+            CREATE TABLE group_members (
+                group_id  TEXT NOT NULL,
+                username  TEXT NOT NULL,
+                added_at  TEXT NOT NULL,
+                added_by  TEXT NOT NULL,
+                PRIMARY KEY (group_id, username)
+            )
+        """))
+        c.execute(_t("""
+            CREATE TABLE custom_roles (
+                id          TEXT PRIMARY KEY,
+                name        TEXT UNIQUE NOT NULL,
+                label       TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                color       TEXT NOT NULL DEFAULT 'gray',
+                is_builtin  INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL,
+                created_by  TEXT NOT NULL DEFAULT 'system'
+            )
+        """))
+        c.execute(_t("""
+            CREATE TABLE role_permissions (
+                role_id    TEXT NOT NULL,
+                permission TEXT NOT NULL,
+                PRIMARY KEY (role_id, permission)
             )
         """))
 

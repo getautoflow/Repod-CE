@@ -16,7 +16,21 @@ from db.engine import db_conn
 MAX_FAILED_ATTEMPTS: int = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
 LOCKOUT_MINUTES:     int = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
 
-VALID_ROLES = {"admin", "maintainer", "uploader", "auditor", "reader"}
+_BUILTIN_ROLES = {"admin", "maintainer", "uploader", "auditor", "reader"}
+
+
+def _get_valid_roles() -> set[str]:
+    """Retourne les rôles valides (built-in + custom). Utilisé pour valider les assignations."""
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(text("SELECT name FROM custom_roles")).fetchall()
+            return {r[0] for r in rows} | _BUILTIN_ROLES
+    except Exception:
+        return _BUILTIN_ROLES
+
+
+# Alias statique pour rétrocompatibilité des imports existants
+VALID_ROLES = _BUILTIN_ROLES
 
 ROLE_DESCRIPTIONS = {
     "admin": {
@@ -117,7 +131,7 @@ def list_users() -> list[dict]:
 def create_user(username: str, password: str, role: str = "reader",
                 full_name: str = "", email: str = "",
                 auth_source: str = "local") -> dict:
-    if role not in VALID_ROLES:
+    if role not in _get_valid_roles():
         raise ValueError(f"Rôle invalide : {role}")
     hashed = hash_password(password)
     now = datetime.now(timezone.utc).isoformat()
@@ -140,7 +154,7 @@ def update_user(username: str, role: str | None = None, full_name: str | None = 
     user = get_user_any(username)
     if not user:
         return None
-    if role is not None and role not in VALID_ROLES:
+    if role is not None and role not in _get_valid_roles():
         raise ValueError(f"Rôle invalide : {role}")
     with db_conn() as conn:
         if role is not None:

@@ -210,3 +210,23 @@ def notify(event_type: str, context: dict[str, Any] | None = None) -> None:
         logger.info("[notifications] %s — %s", event_type, subject)
     except Exception as exc:
         logger.error("[notifications] Échec de rendu : %s", type(exc).__name__)
+
+
+def notify_decision(
+    package: str,
+    version: str,
+    action: str,
+    decided_by: str,
+    justification: str,
+    expires_in_days: int | None = None,
+) -> bool:
+    """Notifie via le bus interne qu une decision RSSI vient d etre prise."""
+    notify("security_decision", {
+        "package": package,
+        "version": version,
+        "action": action,
+        "decided_by": decided_by,
+        "justification": justification,
+        "expires_in_days": expires_in_days,
+    })
+    return True

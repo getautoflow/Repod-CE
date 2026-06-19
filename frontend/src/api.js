@@ -377,3 +377,70 @@ export const rescanPackage = (name, version, arch = "amd64") =>
 export const getLogs = (p = {}) =>
   api.get("/logs", { params: p }).then((r) => r.data);
 
+
+
+// ─── Décisions CVE — fonctions étendues ───────────────────────────────────────
+
+export const getMyDecisions = () =>
+  api.get("/security/decisions/mine").then((r) => r.data);
+
+export const getUnassignedDecisions = () =>
+  api.get("/security/decisions/unassigned").then((r) => r.data);
+
+export const assignDecision = (decisionId, assignedTo, assignedToType) =>
+  api.patch(`/security/decisions/${decisionId}/assign`, {
+    assigned_to: assignedTo || null,
+    assigned_to_type: assignedTo ? assignedToType : null,
+  }).then((r) => r.data);
+
+export const updateDecision = (decisionId, payload) =>
+  api.put(`/security/decisions/${decisionId}`, payload).then((r) => r.data);
+
+export const deleteDecisionById = (decisionId) =>
+  api.delete(`/security/decisions/${decisionId}`).then((r) => r.data);
+
+// ─── Groupes ──────────────────────────────────────────────────────────────────
+
+export const listGroups = () =>
+  api.get("/groups").then((r) => r.data);
+
+export const getMyGroups = () =>
+  api.get("/groups/me").then((r) => r.data);
+
+export const createGroup = (payload) =>
+  api.post("/groups", payload).then((r) => r.data);
+
+export const updateGroup = (id, payload) =>
+  api.put(`/groups/${encodeURIComponent(id)}`, payload).then((r) => r.data);
+
+export const deleteGroup = (id) =>
+  api.delete(`/groups/${encodeURIComponent(id)}`).then((r) => r.data);
+
+export const getGroupMembers = (id) =>
+  api.get(`/groups/${encodeURIComponent(id)}/members`).then((r) => r.data);
+
+export const addGroupMember = (id, username) =>
+  api.post(`/groups/${encodeURIComponent(id)}/members`, { username }).then((r) => r.data);
+
+export const removeGroupMember = (id, username) =>
+  api.delete(`/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(username)}`).then((r) => r.data);
+
+// ─── Rôles personnalisables ───────────────────────────────────────────────────
+
+export const listRoles = () =>
+  api.get("/roles").then((r) => r.data);
+
+export const createRole = (payload) =>
+  api.post("/roles", payload).then((r) => r.data);
+
+export const updateRole = (id, payload) =>
+  api.put(`/roles/${encodeURIComponent(id)}`, payload).then((r) => r.data);
+
+export const deleteRole = (id) =>
+  api.delete(`/roles/${encodeURIComponent(id)}`).then((r) => r.data);
+
+export const getRolePermissions = (id) =>
+  api.get(`/roles/${encodeURIComponent(id)}/permissions`).then((r) => r.data);
+
+export const setRolePermissions = (id, permissions) =>
+  api.put(`/roles/${encodeURIComponent(id)}/permissions`, { permissions }).then((r) => r.data);

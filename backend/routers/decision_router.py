@@ -19,6 +19,7 @@ from auth.dependencies import get_current_user, get_maintainer_user
 from routers.security_common import POOL_DIR, STAGING_QUARANTINE
 from services.audit import log as audit_log
 from services.distributions import remove_package as _repo_remove_package
+from services.email_notifications import notify_decision_email
 from services.format_router import (
     ACCEPTED_EXTENSIONS as _ACCEPTED_EXTS,
 )
@@ -32,26 +33,200 @@ from services.format_router import (
     is_apt as _is_apt,
 )
 from services.manifest import list_manifests, load_manifest, save_manifest
+from services.notifications import notify_decision
 from services.path_safety import PathTraversalError, safe_path_join, safe_path_join_http
 from services.security_decisions import (
     ACTION_TO_STATUS,
+    assign_decision,
+    delete_decision,
+    get_decision_by_id,
     get_sla_status,
     list_all_decisions,
+    list_decisions_for_user,
     load_decision,
     resolve_decision,
     save_decision,
+    update_decision,
 )
 
 router = APIRouter(prefix="/security", tags=["Security"])
 
 
 class DecisionRequest(BaseModel):
-    action:          str           # accept_risk | exception | reject | upgrade_required
-    justification:   str           # obligatoire
-    expires_in_days: int | None = None   # pour accept_risk et exception
-    target_version:  str | None = None   # pour upgrade_required
-    cve_ids:         list[str] = []      # CVE IDs couverts (vide = tous)
-    arch:            str = "amd64"
+    action:           str           # accept_risk | exception | reject | upgrade_required
+    justification:    str           # obligatoire
+    expires_in_days:  int | None = None   # pour accept_risk et exception
+    target_version:   str | None = None   # pour upgrade_required
+    cve_ids:          list[str] = []      # CVE IDs couverts (vide = tous)
+    arch:             str = "amd64"
+    assigned_to:      str | None = None   # username ou group id
+    assigned_to_type: str | None = None   # "user" | "group"
+
+
+@router.get("/decisions")
+def list_decisions(current_user: str = Depends(get_current_user)):
+    """
+    Retourne toutes les décisions RSSI enregistrées, pour le suivi/audit.
+
+    Chaque décision est enrichie avec :
+    - `sla` : statut d'expiration (accept_risk / exception)
+    """
+    decisions = []
+    for decision in list_all_decisions():
+        entry = dict(decision)
+        entry["sla"] = get_sla_status(decision)
+
+        if decision.get("action") == "upgrade_required" and decision.get("target_version"):
+            # CE : pas de compliance_engine ni inventory
+            entry["patch_status"] = {"available": False}
+            entry["index_status"] = {"available": False, "indexed_version": None}
+            manifest = load_manifest(decision["package"], decision["version"], decision.get("arch", "amd64"))
+            entry["distribution"] = manifest.get("distribution") if manifest else None
+
+        # CE : pas d'inventaire machine
+        entry["install_count"] = 0
+        entry["install_clients"] = []
+
+        decisions.append(entry)
+
+    decisions.sort(key=lambda d: d.get("decided_at") or "", reverse=True)
+    return {"decisions": decisions, "count": len(decisions)}
+
+
+@router.get("/decisions/unassigned")
+def list_unassigned_decisions(current_user: str = Depends(get_current_user)):
+    """Décisions sans assignation — nécessitent une attribution manuelle."""
+    decisions = []
+    for decision in list_all_decisions():
+        if decision.get("assigned_to"):
+            continue
+        entry = dict(decision)
+        entry["sla"] = get_sla_status(decision)
+        entry["install_count"] = 0
+        entry["install_clients"] = []
+        decisions.append(entry)
+
+    decisions.sort(key=lambda d: d.get("decided_at") or "", reverse=True)
+    return {"decisions": decisions, "count": len(decisions)}
+
+
+class AssignRequest(BaseModel):
+    assigned_to:      str | None = None  # username ou group id ; None = retirer l'assignation
+    assigned_to_type: str | None = None  # "user" | "group"
+
+
+@router.patch("/decisions/{decision_id}/assign")
+def assign_decision_endpoint(
+    decision_id: str,
+    body: AssignRequest,
+    current_user: str = Depends(get_maintainer_user),
+):
+    """Assigner ou réassigner une décision existante (sans changer la décision elle-même)."""
+    if body.assigned_to and body.assigned_to_type not in ("user", "group"):
+        raise HTTPException(status_code=400, detail="assigned_to_type doit être 'user' ou 'group'")
+
+    decision = assign_decision(decision_id, body.assigned_to, body.assigned_to_type)
+    if decision is None:
+        raise HTTPException(status_code=404, detail=f"Décision {decision_id} introuvable")
+
+    if body.assigned_to:
+        try:
+            from services.cve_assignment import notify_assignment
+            notify_assignment(
+                decision["package"], decision["version"],
+                body.assigned_to, body.assigned_to_type or "user",
+                decision.get("cve_ids") or [],
+            )
+        except Exception:
+            pass
+
+    return {"decision": decision}
+
+
+class UpdateDecisionRequest(BaseModel):
+    action:          str
+    justification:   str
+    expires_in_days: int | None = None
+    target_version:  str | None = None
+
+
+@router.put("/decisions/{decision_id}")
+def update_decision_endpoint(
+    decision_id: str,
+    body: UpdateDecisionRequest,
+    current_user: str = Depends(get_maintainer_user),
+):
+    """Modifier une décision existante. Admin = toutes; maintainer = ses propres."""
+    from auth.dependencies import get_user_role
+    existing = get_decision_by_id(decision_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Décision {decision_id} introuvable")
+
+    role = get_user_role(current_user)
+    if role != "admin" and existing.get("decided_by") != current_user:
+        raise HTTPException(status_code=403, detail="Vous ne pouvez modifier que vos propres décisions")
+
+    if body.action not in ("accept_risk", "exception", "reject", "upgrade_required"):
+        raise HTTPException(status_code=400, detail=f"Action invalide : {body.action}")
+    if not body.justification.strip():
+        raise HTTPException(status_code=400, detail="La justification est obligatoire")
+
+    updated = update_decision(
+        decision_id=decision_id,
+        action=body.action,
+        justification=body.justification,
+        expires_in_days=body.expires_in_days,
+        target_version=body.target_version,
+        updated_by=current_user,
+    )
+    audit_log(
+        "SECURITY_DECISION_UPDATE", current_user, "SUCCESS",
+        detail=f"Décision {decision_id} mise à jour → {body.action}",
+    )
+    return {"decision": updated}
+
+
+@router.delete("/decisions/{decision_id}")
+def delete_decision_endpoint(
+    decision_id: str,
+    current_user: str = Depends(get_maintainer_user),
+):
+    """Supprimer une décision. Admin = toutes; maintainer = ses propres."""
+    from auth.dependencies import get_user_role
+    existing = get_decision_by_id(decision_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Décision {decision_id} introuvable")
+
+    role = get_user_role(current_user)
+    if role != "admin" and existing.get("decided_by") != current_user:
+        raise HTTPException(status_code=403, detail="Vous ne pouvez supprimer que vos propres décisions")
+
+    delete_decision(existing["package"], existing["version"], existing.get("arch", "amd64"))
+    audit_log(
+        "SECURITY_DECISION_DELETE", current_user, "SUCCESS",
+        detail=f"Décision supprimée : {existing['package']} {existing['version']}",
+    )
+    return {"status": "deleted", "id": decision_id}
+
+
+@router.get("/decisions/mine")
+def list_my_decisions(current_user: str = Depends(get_current_user)):
+    """Retourne les décisions assignées à l'utilisateur courant ou à ses groupes."""
+    from services.groups import get_user_group_ids
+
+    group_ids = get_user_group_ids(current_user)
+
+    decisions = []
+    for decision in list_decisions_for_user(current_user, group_ids):
+        entry = dict(decision)
+        entry["sla"] = get_sla_status(decision)
+        # CE : pas de compliance_engine ni inventory
+        entry["install_count"] = 0
+        entry["install_clients"] = []
+        decisions.append(entry)
+
+    decisions.sort(key=lambda d: d.get("decided_at") or "", reverse=True)
+    return {"decisions": decisions, "count": len(decisions)}
 
 
 @router.get("/packages/{name}/{version}/decision")
@@ -117,7 +292,23 @@ def decide_package(
         raise HTTPException(status_code=409,
                             detail=f"Ce paquet n'est pas en révision (statut: {current_status})")
 
+    # Auto-assignation si non spécifiée et règles configurées
+    assigned_to      = body.assigned_to
+    assigned_to_type = body.assigned_to_type
+    if not assigned_to:
+        try:
+            from services.cve_assignment import auto_assign
+            from services.settings import get_settings
+            _settings = get_settings()
+            _rules = _settings.get("cve_assignment_rules", [])
+            if _rules:
+                _severities = [c.get("severity", "") for c in manifest.get("cve_results", [])]
+                assigned_to, assigned_to_type = auto_assign(_severities, _rules)
+        except Exception:
+            pass
+
     # Persister la décision
+    cve_ids = body.cve_ids or [c["id"] for c in manifest.get("cve_results", []) if c.get("id")]
     decision = save_decision(
         name=name, version=version, arch=body.arch,
         action=body.action,
@@ -125,8 +316,18 @@ def decide_package(
         decided_by=current_user,
         expires_in_days=body.expires_in_days,
         target_version=body.target_version,
-        cve_ids=body.cve_ids or [c["id"] for c in manifest.get("cve_results", []) if c.get("id")],
+        cve_ids=cve_ids,
+        assigned_to=assigned_to,
+        assigned_to_type=assigned_to_type,
     )
+
+    # Notification d'assignation
+    if assigned_to:
+        try:
+            from services.cve_assignment import notify_assignment
+            notify_assignment(name, version, assigned_to, assigned_to_type or "user", cve_ids)
+        except Exception:
+            pass
 
     # Mettre à jour le manifest
     new_status = ACTION_TO_STATUS[body.action]
@@ -174,6 +375,27 @@ def decide_package(
         ),
     )
 
+    # ── Notifications (webhook + email) ──────────────────────────────────────
+    try:
+        notify_decision(
+            package=name,
+            version=version,
+            action=body.action,
+            decided_by=current_user,
+            justification=body.justification,
+            expires_in_days=body.expires_in_days,
+        )
+        notify_decision_email(
+            package=name,
+            version=version,
+            action=body.action,
+            decided_by=current_user,
+            justification=body.justification,
+            expires_in_days=body.expires_in_days,
+        )
+    except Exception:
+        pass  # notifications non bloquantes
+
     return {
         "status":   "ok",
         "package":  name,
@@ -188,6 +410,153 @@ def decide_package(
             "upgrade_required": f"{name} en attente de mise à jour vers {body.target_version}",
         }.get(body.action, "Décision enregistrée"),
     }
+
+
+# ─── Décisions machines clientes (flux Conformité Patch) ─────────────────────
+
+class ClientDecisionRequest(BaseModel):
+    package:         str
+    version:         str
+    arch:            str = "x86_64"
+    distro_family:   str = ""
+    action:          str
+    justification:   str
+    expires_in_days: int | None = None
+    target_version:  str | None = None
+    cve_ids:         list[str] = []
+    client_ids:      list[str] = []
+    hostnames:       list[str] = []
+
+
+@router.post("/client-decisions")
+def create_client_decision(
+    body: ClientDecisionRequest,
+    current_user: str = Depends(get_maintainer_user),
+):
+    """Enregistre une décision RSSI sur un paquet vulnérable installé sur une machine cliente."""
+    from services.client_decisions import (
+        VALID_ACTIONS as _VALID,
+    )
+    from services.client_decisions import (
+        save_client_decision,
+    )
+    if body.action not in _VALID:
+        raise HTTPException(status_code=400,
+                            detail=f"Action invalide. Valeurs : {sorted(_VALID)}")
+    if not body.justification.strip():
+        raise HTTPException(status_code=400, detail="La justification est obligatoire")
+
+    decision = save_client_decision(
+        package=body.package, version=body.version, arch=body.arch,
+        distro_family=body.distro_family, action=body.action,
+        justification=body.justification, decided_by=current_user,
+        client_ids=body.client_ids, hostnames=body.hostnames,
+        cve_ids=body.cve_ids, expires_in_days=body.expires_in_days,
+        target_version=body.target_version,
+    )
+
+    audit_log(
+        "CLIENT_DECISION", current_user, "SUCCESS",
+        package=body.package, version=body.version,
+        detail=(
+            f"Action : {body.action} | "
+            f"Machines : {', '.join(body.hostnames or body.client_ids or ['?'])} | "
+            f"{body.justification[:80]}"
+        ),
+    )
+
+    try:
+        notify_decision(
+            package=body.package, version=body.version, action=body.action,
+            decided_by=current_user, justification=body.justification,
+            expires_in_days=body.expires_in_days,
+        )
+        notify_decision_email(
+            package=body.package, version=body.version, action=body.action,
+            decided_by=current_user, justification=body.justification,
+            expires_in_days=body.expires_in_days,
+        )
+    except Exception:
+        pass
+
+    return {"status": "ok", "decision": decision}
+
+
+@router.get("/client-decisions")
+def list_client_decisions_endpoint(current_user: str = Depends(get_current_user)):
+    """
+    Retourne toutes les décisions RSSI sur machines clientes,
+    enrichies du statut SLA et du statut de résolution.
+    """
+    from services.client_decisions import get_sla_status as _sla
+    from services.client_decisions import list_client_decisions
+    decisions = list_client_decisions()
+    result = []
+    for d in decisions:
+        entry = dict(d)
+        entry["sla"] = _sla(d)
+        result.append(entry)
+    return {"decisions": result, "count": len(result)}
+
+
+@router.post("/client-decisions/{decision_id}/resolve")
+def resolve_client_decision_endpoint(
+    decision_id: str,
+    current_user: str = Depends(get_maintainer_user),
+):
+    """Marque manuellement une décision client comme résolue (CVE patchée ou risque éliminé)."""
+    from services.client_decisions import load_client_decision, resolve_client_decision
+    d = load_client_decision(decision_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Décision introuvable")
+    if d.get("resolved_at"):
+        raise HTTPException(status_code=409, detail="Cette décision est déjà résolue")
+
+    updated = resolve_client_decision(decision_id, current_user)
+    audit_log(
+        "CLIENT_DECISION_RESOLVED", current_user, "SUCCESS",
+        package=d.get("package"), version=d.get("version"),
+        detail=f"Décision {decision_id[:8]}… résolue manuellement",
+    )
+    return {"status": "ok", "decision": updated}
+
+
+class ResolveDecisionRequest(BaseModel):
+    arch: str = "amd64"
+    note:  str = ""
+
+
+@router.post("/packages/{name}/{version}/decision/resolve")
+def resolve_decision_endpoint(
+    name: str,
+    version: str,
+    body: ResolveDecisionRequest,
+    current_user: str = Depends(get_maintainer_user),
+):
+    """
+    Clôture manuellement une décision 'upgrade_required' une fois le correctif
+    déployé sur le parc, pour audit (sort la décision de la file d'action tout
+    en conservant son historique dans "Suivi des décisions").
+    """
+    decision = load_decision(name, version, body.arch)
+    if not decision:
+        raise HTTPException(status_code=404, detail=f"Décision introuvable pour {name} {version}")
+
+    if decision.get("action") != "upgrade_required":
+        raise HTTPException(status_code=409, detail="Seules les décisions 'upgrade_required' peuvent être résolues")
+
+    if decision.get("resolved_at"):
+        raise HTTPException(status_code=409, detail="Cette décision est déjà résolue")
+
+    updated = resolve_decision(name, version, body.arch, current_user, body.note)
+
+    audit_log(
+        "DECISION_RESOLVED", current_user, "SUCCESS",
+        package=name, version=version,
+        detail=f"Décision 'upgrade_required' -> {decision.get('target_version')} marquée résolue. {body.note[:100]}".strip(),
+    )
+
+    return {"status": "ok", "decision": updated}
 
 
 @router.post("/packages/{name}/{version}/quarantine")
@@ -271,43 +640,3 @@ def quarantine_package(
         "deb_moved": moved_deb,
         "message": f"{name} {version} déplacé en quarantaine",
     }
-
-
-@router.get("/decisions")
-def list_decisions(current_user: str = Depends(get_current_user)):
-    """Retourne toutes les décisions RSSI enregistrées, pour le suivi/audit."""
-    decisions = []
-    for decision in list_all_decisions():
-        entry = dict(decision)
-        entry["sla"] = get_sla_status(decision)
-        # CE : pas d'inventaire machine
-        entry["install_count"] = 0
-        entry["install_clients"] = []
-        decisions.append(entry)
-
-    decisions.sort(key=lambda d: d.get("decided_at") or "", reverse=True)
-    return {"decisions": decisions, "count": len(decisions)}
-
-
-class ResolveRequest(BaseModel):
-    arch: str = "amd64"
-    note: str = ""
-
-
-@router.post("/packages/{name}/{version}/decision/resolve")
-def resolve_package_decision(
-    name: str,
-    version: str,
-    body: ResolveRequest,
-    current_user: str = Depends(get_maintainer_user),
-):
-    """Clôture manuellement une décision 'upgrade_required' une fois le correctif déployé."""
-    decision = resolve_decision(name, version, body.arch, current_user, body.note)
-    if decision is None:
-        raise HTTPException(status_code=404, detail=f"Décision introuvable pour {name} {version}")
-    audit_log(
-        "DECISION_RESOLVED", current_user, "SUCCESS",
-        package=name, version=version,
-        detail=f"Note : {body.note[:100]}",
-    )
-    return {"status": "resolved", "decision": decision}
