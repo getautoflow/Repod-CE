@@ -54,7 +54,11 @@ export default function LoginPage() {
       } else if (status === 429) {
         setError("Trop de tentatives. Réessayez dans quelques minutes.");
       } else {
-        setError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+        if (!err?.response) {
+          setError("Le serveur n'est pas encore prêt. Patientez quelques secondes et réessayez.");
+        } else {
+          setError(`Erreur serveur (${status}). Réessayez dans quelques instants.`);
+        }
       }
     } finally {
       setLoading(false);

@@ -211,6 +211,20 @@ def logout(
     return {"status": "logged_out"}
 
 
+# ─── Rafraîchissement du token ────────────────────────────────────────────────
+
+@router.post("/refresh")
+def refresh_token(
+    current_user: dict = Depends(get_current_user_full),
+):
+    token = create_access_token({
+        "sub":       current_user["username"],
+        "role":      current_user["role"],
+        "full_name": current_user.get("full_name", ""),
+    })
+    return {"access_token": token, "token_type": "bearer"}
+
+
 # ─── Compte courant ───────────────────────────────────────────────────────────
 
 @router.get("/me")

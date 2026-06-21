@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
-import { setApiToken, clearApiToken } from "../api";
+import { setApiToken, clearApiToken, refreshToken } from "../api";
 
 const AuthContext = createContext(null);
 
@@ -152,6 +152,40 @@ export function AuthProvider({ children }) {
     clearApiToken();
     setToken(null);
   };
+
+  useEffect(() => {
+    if (!token) return;
+    let lastActivity = Date.now();
+    const REFRESH_INTERVAL = 45 * 60 * 1000;
+    const INACTIVITY_LIMIT = 120 * 60 * 1000;
+
+    const trackActivity = () => { lastActivity = Date.now(); };
+    window.addEventListener("mousemove", trackActivity);
+    window.addEventListener("keydown", trackActivity);
+    window.addEventListener("click", trackActivity);
+
+    const interval = setInterval(async () => {
+      const idle = Date.now() - lastActivity;
+      if (idle > INACTIVITY_LIMIT) {
+        signOut();
+        window.location.href = "/login";
+        return;
+      }
+      try {
+        const data = await refreshToken();
+        if (data?.access_token) {
+          signIn(data.access_token);
+        }
+      } catch {}
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("mousemove", trackActivity);
+      window.removeEventListener("keydown", trackActivity);
+      window.removeEventListener("click", trackActivity);
+    };
+  }, [token]);
 
   return (
     <AuthContext.Provider value={{

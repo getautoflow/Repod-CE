@@ -46,6 +46,9 @@ export const login = (username, password) =>
 export const getMe = () =>
   api.get("/auth/me").then((r) => r.data);
 
+export const refreshToken = () =>
+  api.post("/auth/refresh").then((r) => r.data);
+
 // ─── MFA TOTP ─────────────────────────────────────────────────────────────────
 export const mfaSetup = () =>
   api.post("/auth/mfa/setup").then((r) => r.data);

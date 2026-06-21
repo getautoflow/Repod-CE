@@ -110,21 +110,6 @@ function FieldRow({ label, hint, children }) {
   );
 }
 
-function SaveButton({ onClick, saving, dirty }) {
-  return (
-    <div className="flex justify-end pt-2">
-      <button
-        onClick={onClick}
-        disabled={saving || !dirty}
-        className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg
-                   hover:bg-blue-700 disabled:opacity-40 transition-colors"
-      >
-        {saving ? "Enregistrement..." : "Enregistrer"}
-      </button>
-    </div>
-  );
-}
-
 // ─── Logs SSE (sync manuelle) ─────────────────────────────────────────────────
 
 function LogLine({ line }) {
@@ -852,12 +837,6 @@ export default function SettingsPage() {
             Configuration du serveur repod (admin uniquement).
           </p>
         </div>
-        {isDirty && (
-          <span className="text-xs bg-yellow-100 text-yellow-700 border border-yellow-200
-                           px-3 py-1 rounded-full font-medium">
-            Modifications non sauvegardées
-          </span>
-        )}
       </div>
 
       {/* Sections */}
@@ -872,10 +851,28 @@ export default function SettingsPage() {
       <GpgSection />
       <CiIntegrationsSection />
 
-      {/* Bouton global de sauvegarde */}
-      <div className="bg-white rounded-xl border border-gray-200 px-6 py-4">
-        <SaveButton onClick={handleSave} saving={saving} dirty={isDirty} />
-      </div>
+      {/* Barre de sauvegarde sticky */}
+      {isDirty && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.08)]">
+          <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-sm text-gray-600">Modifications non sauvegardées</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => { setSettings(JSON.parse(original)); }}
+                className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 transition-colors">
+                Annuler
+              </button>
+              <button onClick={handleSave} disabled={saving}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg
+                           hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                {saving ? "Enregistrement..." : "Sauvegarder"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

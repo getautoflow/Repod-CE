@@ -410,8 +410,8 @@ function NavItem({ to, end, icon, label, badge, perm, collapsed = false }) {
             collapsed ? "px-0 py-2.5 justify-center w-full" : "gap-3 px-3 py-2.5"
           } ${
             isActive
-              ? "bg-blue-600/[0.12] text-white"
-              : "text-slate-400 hover:bg-navy-800 hover:text-slate-200"
+              ? "bg-violet-600/[0.15] text-violet-300"
+              : "text-slate-400 hover:bg-violet-600/[0.10] hover:text-violet-300"
           }`
         }
       >
@@ -419,7 +419,7 @@ function NavItem({ to, end, icon, label, badge, perm, collapsed = false }) {
           <>
             {/* Icône */}
             <span className={`w-4 h-4 shrink-0 transition-colors ${
-              isActive ? "text-blue-400" : "text-slate-500 group-hover/navitem:text-slate-300"
+              isActive ? "text-violet-400" : "text-slate-500 group-hover/navitem:text-violet-400"
             }`}>
               {icon}
             </span>
