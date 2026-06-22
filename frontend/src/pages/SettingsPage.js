@@ -69,7 +69,7 @@ function SectionCard({ title, description, tooltip, icon, children }) {
         <span className="w-5 h-5 text-gray-500 shrink-0">{icon}</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
             {tooltip && <HelpTooltip text={tooltip} position="right" />}
           </div>
           {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
@@ -214,7 +214,7 @@ function SyncSection({ settings, onChange }) {
             <select
               value={sync.hour ?? 3}
               onChange={(e) => onChange("sync", { ...sync, hour: parseInt(e.target.value) })}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
             >
               {HOURS.map((h) => (
                 <option key={h} value={h}>{String(h).padStart(2, "0")}h</option>
@@ -224,7 +224,7 @@ function SyncSection({ settings, onChange }) {
             <select
               value={sync.minute ?? 0}
               onChange={(e) => onChange("sync", { ...sync, minute: parseInt(e.target.value) })}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
             >
               {MINUTES.map((m) => (
                 <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
@@ -413,7 +413,7 @@ function RetentionSection({ settings, onChange }) {
               onChange("retention", { ...ret, audit_days: parseInt(e.target.value) || 90 })
             }
             className="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
           />
           <span className="text-sm text-gray-500">jours</span>
         </div>
@@ -433,7 +433,7 @@ function RetentionSection({ settings, onChange }) {
               onChange("retention", { ...ret, import_cleanup_days: parseInt(e.target.value) || 30 })
             }
             className="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
           />
           <span className="text-sm text-gray-500">jours</span>
         </div>
@@ -556,7 +556,7 @@ function ValidationSection({ settings, onChange }) {
               onChange("validation", { ...val, max_upload_size_mb: parseInt(e.target.value) || 500 })
             }
             className="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
           />
           <span className="text-sm text-gray-500">Mo</span>
         </div>
@@ -638,7 +638,7 @@ function CvePolicySection({ settings, onChange }) {
               value={pol.sla_high_days ?? 30}
               onChange={(e) => set("sla_high_days", parseInt(e.target.value) || 30)}
               className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-center
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                         focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
             />
           </FieldRow>
 
@@ -903,64 +903,61 @@ function EmailSection({ settings, onChange }) {
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">Notifications email (SMTP)</h2>
+          <h2 className="text-base font-semibold text-gray-900">Notifications email (SMTP)</h2>
           <p className="text-xs text-gray-400 mt-0.5">
             Alertes CVE, SLA et révisions envoyées par email en complément du webhook.
           </p>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <div className={`w-9 h-5 rounded-full transition-colors relative ${cfg.enabled ? "bg-blue-500" : "bg-gray-300"}`}
-            onClick={() => set("enabled", !cfg.enabled)}>
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${cfg.enabled ? "translate-x-4" : "translate-x-0.5"}`}/>
-          </div>
+        <div className="flex items-center gap-2">
+          <Toggle checked={cfg.enabled} onChange={(v) => set("enabled", v)} />
           <span className="text-xs font-medium text-gray-600">{cfg.enabled ? "Activé" : "Désactivé"}</span>
-        </label>
+        </div>
       </div>
 
       <div className={`p-6 space-y-4 ${!cfg.enabled ? "opacity-50 pointer-events-none" : ""}`}>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Serveur SMTP</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Serveur SMTP</label>
             <input type="text" value={cfg.smtp_host || ""} onChange={e => set("smtp_host", e.target.value)}
               placeholder="smtp.example.com"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Port</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Port</label>
             <input type="number" value={cfg.smtp_port || 587} onChange={e => set("smtp_port", parseInt(e.target.value))}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Utilisateur SMTP</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Utilisateur SMTP</label>
             <input type="text" value={cfg.smtp_user || ""} onChange={e => set("smtp_user", e.target.value)}
               placeholder="repod@example.com"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Mot de passe</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mot de passe</label>
             <input type="password" value={cfg.smtp_password || ""} onChange={e => set("smtp_password", e.target.value)}
               placeholder="••••••••"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Adresse expéditeur</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Adresse expéditeur</label>
           <input type="email" value={cfg.from_address || ""} onChange={e => set("from_address", e.target.value)}
             placeholder="repod@example.com"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
             Destinataires <span className="text-gray-400 font-normal normal-case">(séparés par des virgules)</span>
           </label>
           <input type="text" value={cfg.to_addresses || ""} onChange={e => set("to_addresses", e.target.value)}
             placeholder="rssi@example.com, admin@example.com"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
         </div>
 
         <div className="flex items-center gap-3">
@@ -974,11 +971,11 @@ function EmailSection({ settings, onChange }) {
 
         {/* Test email */}
         <div className="pt-2 border-t border-gray-100">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Tester la configuration</p>
+          <p className="text-sm font-medium text-gray-700 mb-2">Tester la configuration</p>
           <div className="flex gap-2">
             <input type="email" value={testTo} onChange={e => setTestTo(e.target.value)}
               placeholder="Destinataire test (optionnel)"
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
             <button onClick={handleTest} disabled={testing}
               className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
               {testing ? "Envoi..." : "Envoyer un test"}
@@ -1121,7 +1118,7 @@ WEBHOOK_SECRET=<secret-partagé-avec-github>
             d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
         </svg>
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">Intégrations CI/CD</h2>
+          <h2 className="text-base font-semibold text-gray-900">Intégrations CI/CD</h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Extraits prêts à l'emploi pour GitHub Actions, GitLab CI, scripts shell et webhooks entrants.
           </p>
@@ -1349,7 +1346,7 @@ services:
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 9h18M9 21V9"/>
         </svg>
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">Conteneurs Docker</h2>
+          <h2 className="text-base font-semibold text-gray-900">Conteneurs Docker</h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Extraits docker-compose prêts à l'emploi pour connecter vos conteneurs au dépôt privé Repod.
           </p>

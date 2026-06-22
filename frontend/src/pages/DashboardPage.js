@@ -77,14 +77,11 @@ const STATUS_META = {
   upgrade_required: { label: "Upgrade requis", color: C.teal   },
 };
 
-const ACTION_COLOR = {
-  UPLOAD: C.blue, IMPORT: C.teal,
-  PENDING_REVIEW: C.orange, SECURITY_DECISION: C.purple,
-};
-
-const ALERT_COLOR = {
-  deps_missing: C.purple, sla_warning: C.purple,
-  sla_expired: C.red,     security: C.red,
+const ALERT_STYLE = {
+  deps_missing: { bg: "#FDE68A", border: "#D97706", text: "#92400E" },
+  sla_warning:  { bg: "#FDE68A", border: "#D97706", text: "#92400E" },
+  sla_expired:  { bg: `${C.red}18`, border: C.red,  text: C.red    },
+  security:     { bg: `${C.red}18`, border: C.red,  text: C.red    },
 };
 
 const PERIODS = [
@@ -454,12 +451,12 @@ function AlertsBanner({ alerts }) {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
         {alerts.map((a, i) => {
-          const color = ALERT_COLOR[a.type] || C.muted;
+          const style = ALERT_STYLE[a.type] || { bg: `${C.muted}18`, border: C.muted, text: C.muted };
           const isDepsMissing = a.type === "deps_missing";
           return (
             <div key={i}
-              style={{ background: `${color}15`, borderLeft: `3px solid ${color}` }}
-              className="flex items-start justify-between gap-2 px-3 py-2 rounded-r-lg border border-slate-100"
+              style={{ background: style.bg, borderLeft: `3px solid ${style.border}` }}
+              className="flex items-start justify-between gap-2 px-3 py-2 rounded-r-lg"
             >
               <div className="min-w-0 flex-1">
                 <p style={{ color: C.text }} className="text-[12px] font-semibold truncate">
@@ -469,15 +466,15 @@ function AlertsBanner({ alerts }) {
                   {a.message}
                 </p>
                 {isDepsMissing && a.deps?.length > 0 && (
-                  <p className="text-[10px] mt-0.5 font-mono truncate" style={{ color }}>
+                  <p className="text-[10px] mt-0.5 font-mono truncate" style={{ color: style.text }}>
                     {a.deps.join(", ")}
                   </p>
                 )}
               </div>
               {isDepsMissing && (
                 <a href="/packages"
-                  className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md transition-colors"
-                  style={{ color, background: `${color}25` }}
+                  className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md transition-opacity hover:opacity-70"
+                  style={{ color: style.text, background: "#D9770630" }}
                   title="Voir dans les paquets et résoudre"
                 >
                   Résoudre →
@@ -504,7 +501,7 @@ function ImportsTable({ imports, page, onPageChange }) {
   );
 
   return (
-    <div>
+    <div className="flex flex-col">
       {/* -m-4 cancels Panel's p-4 so table spans full width */}
       <div className="overflow-x-auto -mx-4 -mt-4">
         <table className="w-full border-collapse text-xs">
@@ -522,7 +519,7 @@ function ImportsTable({ imports, page, onPageChange }) {
           </thead>
           <tbody>
             {rows.map((e, i) => {
-              const color = ACTION_COLOR[e.action] || C.muted;
+              const ok = e.result === "SUCCESS";
               return (
                 <tr
                   key={i}
@@ -535,19 +532,15 @@ function ImportsTable({ imports, page, onPageChange }) {
                     {e.version || "—"}
                   </td>
                   <td className="px-4 py-2.5">
-                    <span
-                      style={{ background: `${color}15`, color, border: `1px solid ${color}30` }}
-                      className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                    >
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
                       {e.action || "—"}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-slate-400">{fmtTs(e.timestamp)}</td>
                   <td className="px-4 py-2.5">
-                    <span
-                      style={{ background: e.result === "SUCCESS" ? C.green : C.red }}
-                      className="inline-block w-2 h-2 rounded-full"
-                    />
+                    <span className="text-[10px] font-semibold" style={{ color: ok ? C.green : C.red }}>
+                      {ok ? "Succès" : "Échec"}
+                    </span>
                   </td>
                 </tr>
               );
@@ -555,10 +548,12 @@ function ImportsTable({ imports, page, onPageChange }) {
           </tbody>
         </table>
       </div>
-      <Paginator
-        page={page} pages={pages} total={total}
-        perPage={PER_PAGE} onPageChange={onPageChange}
-      />
+      {pages > 1 && (
+        <Paginator
+          page={page} pages={pages} total={total}
+          perPage={PER_PAGE} onPageChange={onPageChange}
+        />
+      )}
     </div>
   );
 }

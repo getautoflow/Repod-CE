@@ -505,7 +505,7 @@ export default function DistributionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Distributions</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Gestion des distributions APT (reprepro), RPM (createrepo_c) et APK (APKINDEX Alpine).
+            Gestion des distributions APT, RPM et APK.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -527,7 +527,7 @@ export default function DistributionsPage() {
             onClick={handleInit}
             disabled={initing}
             className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
-            title="Initialise les distributions (reprepro APT + createrepo_c RPM)"
+            title="Initialise les distributions APT, RPM et APK"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
@@ -647,7 +647,7 @@ export default function DistributionsPage() {
                     </span>
                     <div className="flex-1 h-px bg-emerald-100" />
                     <span className="text-[10px] text-emerald-500 font-medium whitespace-nowrap">
-                      APK · APKINDEX
+                      APK
                     </span>
                   </div>
                   <div className="space-y-1.5">

@@ -24,10 +24,9 @@ function StatusChip({ status }) {
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border"
+      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border"
       style={{ background: meta.bg, color: meta.color, borderColor: meta.border }}
     >
-      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: meta.dot }} />
       {meta.label}
     </span>
   );
@@ -47,7 +46,7 @@ function DistBadge({ codename }) {
   const c = DIST_COLORS[codename] || { bg: "#F8FAFC", text: "#64748B", border: "#E2E8F0" };
   return (
     <span
-      className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border"
+      className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-mono font-semibold border"
       style={{ background: c.bg, color: c.text, borderColor: c.border }}
     >
       {codename}
@@ -77,12 +76,12 @@ function PromotionRow({ record }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm text-slate-900 font-mono">{record.name}</span>
             {record.version && (
-              <span className="text-[11px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-mono">
+              <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-mono">
                 {record.version}
               </span>
             )}
             {/* Flèche source → cible */}
-            <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
               <DistBadge codename={record.from_dist} />
               <svg className="w-3 h-3 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24"
                 stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -91,7 +90,7 @@ function PromotionRow({ record }) {
               <DistBadge codename={record.to_dist} />
             </span>
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
+          <div className="mt-0.5 text-xs text-slate-400">
             Par <strong className="text-slate-600">{record.requested_by}</strong>
             {" · "}{fmtTs(record.requested_at)}
             {record.decided_by && (
@@ -106,19 +105,19 @@ function PromotionRow({ record }) {
         {/* Alertes CVE compactes */}
         <div className="hidden sm:flex items-center gap-1 flex-wrap">
           {blocking.map((b, i) => (
-            <span key={i} className="text-[10px] bg-red-50 text-red-700 border border-red-200
+            <span key={i} className="text-xs bg-red-50 text-red-700 border border-red-200
                                       px-2 py-0.5 rounded-full font-medium">
               {b}
             </span>
           ))}
           {reviewing.map((r, i) => (
-            <span key={i} className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200
+            <span key={i} className="text-xs bg-amber-50 text-amber-700 border border-amber-200
                                       px-2 py-0.5 rounded-full font-medium">
               {r}
             </span>
           ))}
           {warnings.map((w, i) => (
-            <span key={i} className="text-[10px] bg-yellow-50 text-yellow-700 border border-yellow-200
+            <span key={i} className="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200
                                       px-2 py-0.5 rounded-full font-medium">
               {w}
             </span>
@@ -140,7 +139,7 @@ function PromotionRow({ record }) {
 
       {/* Détails dépliés */}
       {open && (
-        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50 space-y-2 text-[12px]">
+        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50 space-y-2 text-sm">
           {blocking.length > 0 && (
             <div className="flex items-start gap-2">
               <span className="mt-0.5 shrink-0">
@@ -258,7 +257,7 @@ export default function PromotionsPage() {
       </div>
 
       {/* ── Info politique CVE ────────────────────────────────────────────── */}
-      <div className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-xl text-[12px] text-slate-600 shadow-sm">
+      <div className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-xl text-sm text-slate-600 shadow-sm">
         <svg className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24"
           stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="10"/>
@@ -269,15 +268,12 @@ export default function PromotionsPage() {
           <p className="font-semibold text-slate-700">Politique de promotion</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-red-500" />
               <strong>Critical</strong> — promotion bloquée
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-yellow-500" />
               <strong>High / Medium</strong> — avertissement, promotion autorisée
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-green-500" />
               <strong>Low / Negligible</strong> — transparent
             </span>
           </div>
@@ -300,7 +296,7 @@ export default function PromotionsPage() {
           </button>
         ))}
         {total > 0 && (
-          <span className="ml-auto text-[11px] text-slate-400">{total} entrée(s)</span>
+          <span className="ml-auto text-xs text-slate-400">{total} entrée(s)</span>
         )}
       </div>
 
@@ -322,7 +318,7 @@ export default function PromotionsPage() {
           <p className="font-medium text-slate-500">
             {filter === "all" ? "Aucune promotion enregistrée" : `Aucune promotion "${filter}"`}
           </p>
-          <p className="text-[12px] mt-0.5">
+          <p className="text-sm mt-0.5">
             Les promotions de paquets entre distributions s'afficheront ici.
           </p>
         </div>
