@@ -72,6 +72,9 @@ export const getSetupStatus = () =>
 export const runSetup = (payload) =>
   api.post("/setup/", payload).then((r) => r.data);
 
+export const getSetupPreflight = () =>
+  api.get("/setup/preflight").then((r) => r.data);
+
 export const resetPasswordWithToken = (token, newPassword) =>
   api.post("/auth/reset-password", { token, new_password: newPassword }).then((r) => r.data);
 

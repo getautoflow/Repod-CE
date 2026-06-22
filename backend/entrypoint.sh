@@ -108,6 +108,50 @@ if [ -f "$SETTINGS_FILE" ]; then
     chown appuser:appuser "$SETTINGS_FILE" 2>/dev/null || true
 fi
 
+# ─── Auto-génération des secrets au premier démarrage ────────────────────────
+
+GENERATED_ENV="/repos/.generated-secrets"
+if [ -z "$JWT_SECRET_KEY" ] || [ "$JWT_SECRET_KEY" = "change-me-in-production" ]; then
+    if [ ! -f "$GENERATED_ENV" ]; then
+        echo "[entrypoint] Premier démarrage — génération des secrets..."
+        cat > "$GENERATED_ENV" <<SECRETS
+JWT_SECRET_KEY=$(openssl rand -hex 32)
+WEBHOOK_SECRET=$(openssl rand -hex 32)
+SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)
+REPOD_LICENSE_VENDOR_KEY=$(openssl rand -hex 32)
+SECRETS
+        chown appuser:appuser "$GENERATED_ENV" 2>/dev/null || true
+        chmod 600 "$GENERATED_ENV"
+        echo "[entrypoint] Secrets générés dans $GENERATED_ENV"
+    fi
+    echo "[entrypoint] Chargement des secrets auto-générés..."
+    set -a
+    . "$GENERATED_ENV"
+    set +a
+fi
+
+# ─── Certificat TLS auto-signé ──────────────────────────────────────────────
+
+CERT_DIR="/repos/certs"
+if [ ! -f "$CERT_DIR/server.crt" ]; then
+    echo "[entrypoint] Génération du certificat TLS auto-signé (10 ans)..."
+    mkdir -p "$CERT_DIR"
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "$CERT_DIR/server.key" \
+        -out "$CERT_DIR/server.crt" \
+        -subj "/CN=repod/O=Repod/C=FR" \
+        2>/dev/null || true
+    if [ -f "$CERT_DIR/server.crt" ]; then
+        chmod 600 "$CERT_DIR/server.key" 2>/dev/null || true
+        chown -R appuser:appuser "$CERT_DIR" 2>/dev/null || true
+        echo "[entrypoint] Certificat TLS créé: $CERT_DIR/server.crt"
+    else
+        echo "[entrypoint] Avertissement: génération TLS échouée (mode HTTP uniquement)"
+    fi
+else
+    echo "[entrypoint] Certificat TLS existant trouvé."
+fi
+
 # ─── Migrations Alembic (PostgreSQL) ─────────────────────────────────────────
 
 echo "[entrypoint] Attente PostgreSQL et exécution des migrations Alembic..."

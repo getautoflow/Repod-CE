@@ -30,6 +30,16 @@ export default defineConfig({
   server: {
     host: true,
     port: 80,
+    proxy: {
+      "/api": {
+        target: "http://backend:8000",
+        changeOrigin: true,
+      },
+      "/health": {
+        target: "http://backend:8000",
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     host: true,

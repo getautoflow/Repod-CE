@@ -269,10 +269,10 @@ function CveDistribution({ posture }) {
               >
                 {label}
               </span>
-              <div className="flex-1 h-2.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="flex-1 h-2.5 bg-slate-100 overflow-hidden" style={{ borderRadius: 0 }}>
                 <div
-                  style={{ width: `${pct}%`, background: color, transition: "width .5s ease" }}
-                  className="h-full rounded-full"
+                  style={{ width: `${pct}%`, background: color, transition: "width .5s ease", borderRadius: 0 }}
+                  className="h-full"
                 />
               </div>
               <span

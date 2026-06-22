@@ -73,10 +73,16 @@ services:
       - apt-repo
       - rpm-repo
       - db
-    env_file: backend.env
+    env_file:
+      - path: backend.env     # optionnel — overrides manuels (créer depuis backend.env.example)
+        required: false
+      - path: .env            # optionnel — variables globales
+        required: false
     environment:
       ENV: production
       DATABASE_URL: postgresql://repod:${POSTGRES_PASSWORD:-repod_dev_password}@db:5432/repod
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
       REPO_FORMAT: all                            # mode APT + RPM + APK Alpine simultané
       POOL_DIR: /repos/pool
       MANIFEST_DIR: /repos/manifests
@@ -113,7 +119,7 @@ services:
       - ./repos/clamav-db:/var/lib/clamav
       - ./repos/grype-db:/repos/grype-db
       - ./repos/settings.json:/repos/settings.json  # paramètres persistants (LDAP, sync, etc.)
-      - ./repos/certs:/repos/certs:ro               # bundles CA pour LDAP TLS (optionnel)
+      - ./repos/certs:/repos/certs:rw               # certificat TLS auto-signé + CA LDAP
       - ./repos/security:/repos/security
       - ./repos/logs:/repos/logs                  # logs nginx (téléchargements)
       - ./repos/gnupg:/repos/gnupg:rw             # trousseau GPG partagé (remplace docker socket)

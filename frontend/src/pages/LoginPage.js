@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { login, mfaAuthenticate, requestPasswordReset, getSetupStatus, runSetup } from "../api";
+import { login, mfaAuthenticate, requestPasswordReset, getSetupStatus, runSetup, getSetupPreflight } from "../api";
 import { useAuth } from "../context/AuthContext";
 
 export default function LoginPage() {
@@ -53,12 +53,10 @@ export default function LoginPage() {
         setError("Identifiant ou mot de passe incorrect.");
       } else if (status === 429) {
         setError("Trop de tentatives. Réessayez dans quelques minutes.");
+      } else if (!err?.response) {
+        setError("Le serveur n'est pas encore prêt. Patientez quelques secondes et réessayez.");
       } else {
-        if (!err?.response) {
-          setError("Le serveur n'est pas encore prêt. Patientez quelques secondes et réessayez.");
-        } else {
-          setError(`Erreur serveur (${status}). Réessayez dans quelques instants.`);
-        }
+        setError(`Erreur serveur (${status}). Réessayez dans quelques instants.`);
       }
     } finally {
       setLoading(false);
@@ -104,8 +102,8 @@ export default function LoginPage() {
 
   if (needsSetup) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
-        <div className="w-full max-w-sm">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 py-8 px-4">
+        <div className="w-full max-w-lg">
           <SetupWizard
             onDone={(accessToken) => {
               signIn(accessToken);
@@ -316,11 +314,102 @@ export default function LoginPage() {
 
 
 // ── Assistant de première installation (création du compte admin) ────────────
+
+const PREFLIGHT_LABELS = {
+  database:   "Base de données",
+  disk_space: "Espace disque",
+  clamav:     "Antivirus (ClamAV)",
+  grype:      "Scanner CVE (Grype)",
+  secrets:    "Secrets applicatifs",
+  tls:        "Certificat TLS",
+};
+
+function PreflightChecks() {
+  const [checks, setChecks]   = useState(null); // null = loading
+  const [errMsg, setErrMsg]   = useState("");
+
+  useEffect(() => {
+    getSetupPreflight()
+      .then((data) => setChecks(data.checks))
+      .catch(() => setErrMsg("Impossible de contacter le serveur pour le diagnostic."));
+  }, []);
+
+  if (errMsg) {
+    return (
+      <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 text-sm text-yellow-800">
+        <svg className="w-4 h-4 text-yellow-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
+        </svg>
+        <span>{errMsg}</span>
+      </div>
+    );
+  }
+
+  if (!checks) {
+    return (
+      <div className="flex items-center justify-center py-4 text-gray-400 text-sm gap-2">
+        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        Diagnostic en cours...
+      </div>
+    );
+  }
+
+  const allOk   = Object.values(checks).every((c) => c.ok);
+  const failCnt = Object.values(checks).filter((c) => !c.ok).length;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-1.5">
+        {Object.entries(checks).map(([key, check]) => (
+          <div
+            key={key}
+            className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm
+              ${check.ok ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base leading-none">{check.ok ? "✅" : "❌"}</span>
+              <span className="font-medium">{PREFLIGHT_LABELS[key] || key}</span>
+            </div>
+            <span className="text-xs opacity-75 text-right max-w-[50%] truncate" title={check.detail}>
+              {check.detail}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {!allOk && (
+        <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 text-sm text-yellow-800">
+          <svg className="w-4 h-4 text-yellow-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
+          </svg>
+          <span>
+            {failCnt} {failCnt === 1 ? "point" : "points"} non satisfait{failCnt > 1 ? "s" : ""}.
+            Vous pouvez continuer l'installation et corriger plus tard.
+          </span>
+        </div>
+      )}
+
+      {allOk && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5 text-sm text-green-800">
+          <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+          </svg>
+          <span>Tous les pré-requis sont satisfaits.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SetupWizard({ onDone }) {
   const [username, setUsername]   = useState("admin");
   const [password, setPassword]   = useState("");
   const [confirm, setConfirm]     = useState("");
   const [email, setEmail]         = useState("");
+  const [appUrl, setAppUrl]       = useState(window.location.origin);
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
 
@@ -347,6 +436,7 @@ function SetupWizard({ onDone }) {
         admin_username: username.trim(),
         admin_password: password,
         admin_email: email.trim(),
+        app_url: appUrl.trim(),
       });
       onDone(data.access_token);
     } catch (err) {
@@ -362,105 +452,166 @@ function SetupWizard({ onDone }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-2xl p-8">
-      <div className="text-center mb-6">
-        <div className="inline-flex items-center justify-center mb-4">
-          <img src="/logo.png" alt="Repod" className="w-16 h-16 object-contain" />
+    <div className="space-y-4">
+      {/* Welcome header */}
+      <div className="bg-white rounded-2xl shadow-2xl p-8">
+        <div className="text-center mb-2">
+          <div className="inline-flex items-center justify-center mb-4">
+            <img src="/logo.png" alt="Repod" className="w-16 h-16 object-contain" />
+          </div>
+          <h1 className="text-2xl font-black tracking-wider text-gray-900 uppercase">Bienvenue sur Repod</h1>
+          <p className="text-sm text-gray-500 mt-2 leading-relaxed max-w-md mx-auto">
+            Gestionnaire de dépôts APT/RPM avec analyse de sécurité intégrée,
+            inventaire machines et déploiement à distance.
+          </p>
         </div>
-        <h1 className="text-2xl font-black tracking-wider text-gray-900 uppercase">Repod</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Bienvenue ! Créez le compte administrateur pour démarrer.
-        </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Nom d'utilisateur
-          </label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => { setUsername(e.target.value); setError(""); }}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            autoFocus
-            autoComplete="username"
-          />
-        </div>
+      {/* Preflight checks */}
+      <div className="bg-white rounded-2xl shadow-xl p-6">
+        <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+          <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Diagnostic pré-installation
+        </h2>
+        <PreflightChecks />
+      </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Mot de passe (8 caractères minimum)
-          </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => { setPassword(e.target.value); setError(""); }}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="••••••••"
-            autoComplete="new-password"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Confirmer le mot de passe
-          </label>
-          <input
-            type="password"
-            value={confirm}
-            onChange={(e) => { setConfirm(e.target.value); setError(""); }}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="••••••••"
-            autoComplete="new-password"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            E-mail (optionnel)
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="admin@example.com"
-            autoComplete="email"
-          />
-        </div>
-
-        {error && (
-          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
-            <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-9v4a1 1 0 102 0V9a1 1 0 10-2 0zm0-4a1 1 0 112 0 1 1 0 01-2 0z" clipRule="evenodd"/>
-            </svg>
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                     disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg
-                     transition-colors text-sm"
-        >
-          {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      {/* Setup form */}
+      <div className="bg-white rounded-2xl shadow-xl p-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Admin account section */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
-              Création du compte…
-            </span>
-          ) : "Créer le compte administrateur"}
-        </button>
-      </form>
+              Compte administrateur
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nom d'utilisateur
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => { setUsername(e.target.value); setError(""); }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  autoFocus
+                  autoComplete="username"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Mot de passe
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="8 caractères min."
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Confirmer
+                  </label>
+                  <input
+                    type="password"
+                    value={confirm}
+                    onChange={(e) => { setConfirm(e.target.value); setError(""); }}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Retapez le mot de passe"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  E-mail <span className="text-gray-400 font-normal">(optionnel)</span>
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="admin@example.com"
+                  autoComplete="email"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Separator */}
+          <div className="border-t border-gray-100" />
+
+          {/* Configuration section */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Configuration
+            </h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                URL publique de l'application
+              </label>
+              <input
+                type="url"
+                value={appUrl}
+                onChange={(e) => setAppUrl(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="https://repod.example.com"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Utilisée pour les notifications email et les liens. Modifiable plus tard dans les paramètres.
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+              <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-9v4a1 1 0 102 0V9a1 1 0 10-2 0zm0-4a1 1 0 112 0 1 1 0 01-2 0z" clipRule="evenodd"/>
+              </svg>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50
+                       disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg
+                       transition-colors text-sm"
+          >
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                Configuration en cours...
+              </span>
+            ) : "Finaliser l'installation"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

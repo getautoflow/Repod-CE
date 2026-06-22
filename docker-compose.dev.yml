@@ -27,13 +27,14 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+        REACT_APP_API_URL: ""
         REACT_APP_REPO_URL: ${REACT_APP_REPO_URL:-http://localhost:80}
     volumes:
       - ./frontend/src:/app/src          # hot-reload React (HMR)
       - ./frontend/public:/app/public
+      - ./frontend/vite.config.js:/app/vite.config.js  # proxy API en dev
     environment:
-      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8000}
+      - REACT_APP_API_URL=
       - REACT_APP_REPO_URL=${REACT_APP_REPO_URL:-http://localhost:80}
       - PORT=80                           # npm start écoute sur 80 = même mapping que nginx
       - CHOKIDAR_USEPOLLING=true          # nécessaire dans VMs/WSL

@@ -185,7 +185,7 @@ export function AuthProvider({ children }) {
       window.removeEventListener("keydown", trackActivity);
       window.removeEventListener("click", trackActivity);
     };
-  }, [token]);
+  }, [!!token]);
 
   return (
     <AuthContext.Provider value={{

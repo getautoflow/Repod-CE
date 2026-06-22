@@ -211,12 +211,17 @@ def logout(
     return {"status": "logged_out"}
 
 
-# ─── Rafraîchissement du token ────────────────────────────────────────────────
+# ─── Rafraîchissement silencieux du token ─────────────────────────────────────
 
 @router.post("/refresh")
 def refresh_token(
     current_user: dict = Depends(get_current_user_full),
 ):
+    """
+    Émet un nouveau JWT avec une expiration fraîche.
+    Appelé automatiquement par le frontend pour prolonger la session
+    tant que l'utilisateur est actif.
+    """
     token = create_access_token({
         "sub":       current_user["username"],
         "role":      current_user["role"],

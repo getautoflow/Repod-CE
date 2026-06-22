@@ -102,7 +102,7 @@ function FieldRow({ label, hint, children }) {
   return (
     <div className="flex items-start justify-between gap-6">
       <div className="min-w-0">
-        <p className="text-sm font-medium text-gray-800">{label}</p>
+        <p className="text-sm font-medium text-gray-700">{label}</p>
         {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
       </div>
       <div className="shrink-0">{children}</div>
@@ -245,7 +245,7 @@ function SyncSection({ settings, onChange }) {
       <div className="pt-2 border-t border-gray-100">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <p className="text-sm font-medium text-gray-800">Synchronisation manuelle</p>
+            <p className="text-sm font-medium text-gray-700">Synchronisation manuelle</p>
             <p className="text-xs text-gray-400">Déclenche immédiatement la sync des sources sécurité actives.</p>
           </div>
           <button
@@ -703,11 +703,11 @@ function EpssPolicySection({ settings, onChange }) {
           className="w-full h-2 rounded-full appearance-none cursor-pointer disabled:opacity-40
                      [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4
                      [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full
-                     [&::-webkit-slider-thumb]:bg-violet-600 [&::-webkit-slider-thumb]:border-2
+                     [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:border-2
                      [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:shadow-md
                      [&::-webkit-slider-thumb]:cursor-pointer
                      [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4
-                     [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-violet-600
+                     [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-600
                      [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white
                      [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:cursor-pointer
                      [&::-moz-range-thumb]:border-solid"
@@ -758,11 +758,11 @@ function EpssPolicySection({ settings, onChange }) {
               <span>EPSS ≥ {blockVal}% — promotion bloquée</span>
             </div>
             <div className="flex items-center gap-2 pt-1 border-t border-slate-200">
-              <span className="w-2 h-2 rounded-full bg-violet-400 shrink-0"/>
+              <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0"/>
               <span>
                 Scores mis à jour depuis{" "}
                 <a href="https://api.first.org" target="_blank" rel="noreferrer"
-                  className="text-violet-600 underline">api.first.org</a>
+                  className="text-blue-600 underline">api.first.org</a>
                 {" "}à chaque scan (cache 24h).
               </span>
             </div>
@@ -908,10 +908,7 @@ function EmailSection({ settings, onChange }) {
             Alertes CVE, SLA et révisions envoyées par email en complément du webhook.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Toggle checked={cfg.enabled} onChange={(v) => set("enabled", v)} />
-          <span className="text-xs font-medium text-gray-600">{cfg.enabled ? "Activé" : "Désactivé"}</span>
-        </div>
+        <Toggle checked={!!cfg.enabled} onChange={(v) => set("enabled", v)} />
       </div>
 
       <div className={`p-6 space-y-4 ${!cfg.enabled ? "opacity-50 pointer-events-none" : ""}`}>

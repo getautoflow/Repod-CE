@@ -1367,7 +1367,7 @@ function DecisionTrackingStatus({ decision, onImported }) {
     if (decision.resolved_at) {
       return (
         <div className="flex flex-col gap-1 items-start">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
             Résolu
           </span>
           <p className="text-[11px] text-gray-400">
@@ -1379,7 +1379,7 @@ function DecisionTrackingStatus({ decision, onImported }) {
     if (patch?.available) {
       return (
         <div className="flex flex-col gap-1.5 items-start">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-700">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-700">
             Correctif disponible ({patch.depot_version})
           </span>
           <ResolveDecisionButton decision={decision} onResolved={onImported} />
@@ -1388,7 +1388,7 @@ function DecisionTrackingStatus({ decision, onImported }) {
     }
     return (
       <div className="flex flex-col gap-1.5 items-start">
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">
           En attente du correctif
         </span>
         {indexStatus?.available && (
@@ -1401,20 +1401,20 @@ function DecisionTrackingStatus({ decision, onImported }) {
   if (sla?.has_sla) {
     if (sla.expired) {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-700">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-700">
           Expiré ({sla.expires_at?.slice(0, 10)})
         </span>
       );
     }
     if (sla.warning) {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-100 text-orange-700">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-100 text-orange-700">
           Expire dans {sla.remaining_days}j
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700">
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-700">
         Valide ({sla.remaining_days}j restants)
       </span>
     );
@@ -2111,11 +2111,11 @@ function CvePostureSection({ onDecideRequest }) {
 
 function StatusBadge({ ok, label }) {
   return ok ? (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
       {label}
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600">
+    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600">
       {label}
     </span>
   );

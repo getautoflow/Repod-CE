@@ -173,17 +173,17 @@ function DistribPanel({ distrib, packages, loading, onClose, onPromote }) {
       {/* Meta : slug / type / paquets */}
       <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100 bg-gray-50">
         <div className="px-2 py-2.5 text-center">
-          <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">SLUG</p>
-          <p className="font-mono text-[10px] text-gray-700 mt-0.5 truncate">{distrib.codename}</p>
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">SLUG</p>
+          <p className="font-mono text-xs text-gray-700 mt-0.5 truncate">{distrib.codename}</p>
         </div>
         <div className="px-2 py-2.5 text-center">
-          <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">TYPE</p>
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">TYPE</p>
           <p className="mt-0.5 flex justify-center">
             <FormatBadge format={distrib.format || (distrib.os === "alpine" ? "apk" : "deb")} />
           </p>
         </div>
         <div className="px-2 py-2.5 text-center">
-          <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">PAQUETS</p>
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">PAQUETS</p>
           <p className="text-sm font-bold text-gray-800 mt-0.5">{distrib.package_count}</p>
         </div>
       </div>
@@ -191,10 +191,10 @@ function DistribPanel({ distrib, packages, loading, onClose, onPromote }) {
       {/* Snippet de configuration client APK */}
       {(distrib.format === "apk" || distrib.os === "alpine") && (
         <div className="px-3 py-2.5 border-b border-emerald-100 bg-emerald-50">
-          <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide mb-1">
+          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-1">
             Configuration client Alpine
           </p>
-          <code className="block text-[10px] font-mono text-emerald-800 bg-white border border-emerald-100 rounded px-2 py-1.5 select-all whitespace-pre-wrap break-all">
+          <code className="block text-xs font-mono text-emerald-800 bg-white border border-emerald-100 rounded px-2 py-1.5 select-all whitespace-pre-wrap break-all">
             {`echo "https://<HOST>/apk/${distrib.codename}/main" >> /etc/apk/repositories\napk update`}
           </code>
         </div>
@@ -246,7 +246,7 @@ function DistribPanel({ distrib, packages, loading, onClose, onPromote }) {
                   <button
                     onClick={() => onPromote(pkg.name)}
                     className="ml-2 shrink-0 opacity-0 group-hover:opacity-100 flex items-center gap-1
-                               text-[11px] font-medium text-blue-600 hover:text-blue-800 transition-opacity"
+                               text-xs font-medium text-blue-600 hover:text-blue-800 transition-opacity"
                     title={`Promouvoir ${pkg.name}`}
                   >
                     Promouvoir
@@ -456,7 +456,7 @@ export default function DistributionsPage() {
       if (fails === 0) {
         toast.success(`${ok}/${total} distributions initialisées`);
       } else {
-        toast.success(`${ok}/${total} initialisées (${fails} en erreur — voir les détails ci-dessous)`);
+        toast.success(`${ok}/${total} initialisées (${fails} ignorées — format non applicable)`);
       }
       load();
     } catch (err) {
@@ -583,7 +583,7 @@ export default function DistributionsPage() {
               {distribs.some((d) => d.format === "deb" || (!d.format && d.os !== "alpine")) && (
                 <div>
                   <div className="flex items-center gap-3 mb-2.5">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-gray-500 whitespace-nowrap">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-500 whitespace-nowrap">
                       Debian / Ubuntu
                     </span>
                     <div className="flex-1 h-px bg-gray-200" />
@@ -604,7 +604,7 @@ export default function DistributionsPage() {
               {distribs.some((d) => d.format === "rpm" && d.os !== "opensuse") && (
                 <div>
                   <div className="flex items-center gap-3 mb-2.5">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-gray-500 whitespace-nowrap">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-500 whitespace-nowrap">
                       RHEL / Compatible
                     </span>
                     <div className="flex-1 h-px bg-gray-200" />
@@ -623,7 +623,7 @@ export default function DistributionsPage() {
               {distribs.some((d) => d.os === "opensuse") && (
                 <div>
                   <div className="flex items-center gap-3 mb-2.5">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-gray-500 whitespace-nowrap">
+                    <span className="text-xs font-bold uppercase tracking-widest text-gray-500 whitespace-nowrap">
                       SUSE
                     </span>
                     <div className="flex-1 h-px bg-gray-200" />
@@ -642,11 +642,11 @@ export default function DistributionsPage() {
               {distribs.some((d) => d.os === "alpine" || d.format === "apk") && (
                 <div>
                   <div className="flex items-center gap-3 mb-2.5">
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-600 whitespace-nowrap">
+                    <span className="text-xs font-bold uppercase tracking-widest text-emerald-600 whitespace-nowrap">
                       Alpine Linux
                     </span>
                     <div className="flex-1 h-px bg-emerald-100" />
-                    <span className="text-[10px] text-emerald-500 font-medium whitespace-nowrap">
+                    <span className="text-xs text-emerald-500 font-medium whitespace-nowrap">
                       APK
                     </span>
                   </div>
