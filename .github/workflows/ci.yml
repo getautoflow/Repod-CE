@@ -42,13 +42,17 @@ jobs:
   test-backend:
     name: Tests — Backend (pytest + coverage)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
 
@@ -86,7 +90,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-coverage-${{ github.run_id }}
+          name: backend-coverage-py${{ matrix.python-version }}-${{ github.run_id }}
           path: backend/coverage.xml
           retention-days: 30
 

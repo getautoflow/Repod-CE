@@ -362,12 +362,13 @@ def db_test_engine():
         """))
         c.execute(_t("""
             CREATE TABLE groups (
-                id          TEXT PRIMARY KEY,
-                name        TEXT UNIQUE NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                color       TEXT NOT NULL DEFAULT 'blue',
-                created_at  TEXT NOT NULL,
-                created_by  TEXT NOT NULL
+                id           TEXT PRIMARY KEY,
+                name         TEXT UNIQUE NOT NULL,
+                description  TEXT NOT NULL DEFAULT '',
+                color        TEXT NOT NULL DEFAULT 'blue',
+                created_at   TEXT NOT NULL,
+                created_by   TEXT NOT NULL,
+                default_role TEXT
             )
         """))
         c.execute(_t("""
