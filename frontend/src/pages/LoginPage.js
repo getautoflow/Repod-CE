@@ -116,8 +116,8 @@ export default function LoginPage() {
 
   if (needsSetup) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 py-8 px-4">
-        <div className="w-full max-w-lg">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-6">
+        <div className="w-full max-w-3xl">
           <SetupWizard
             onDone={(accessToken) => {
               signIn(accessToken);
@@ -327,96 +327,25 @@ export default function LoginPage() {
 }
 
 
-// ── Assistant de première installation (création du compte admin) ────────────
+// ── Assistant de première installation ────────────────────────────────────────
 
-const PREFLIGHT_LABELS = {
-  database:   "Base de données",
-  disk_space: "Espace disque",
-  clamav:     "Antivirus (ClamAV)",
-  grype:      "Scanner CVE (Grype)",
-  secrets:    "Secrets applicatifs",
-  tls:        "Certificat TLS",
+const PREFLIGHT_ICONS = {
+  database:   "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4",
+  disk_space: "M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z",
+  clamav:     "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+  grype:      "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+  secrets:    "M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z",
+  tls:        "M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z",
 };
 
-function PreflightChecks() {
-  const [checks, setChecks]   = useState(null); // null = loading
-  const [errMsg, setErrMsg]   = useState("");
-
-  useEffect(() => {
-    getSetupPreflight()
-      .then((data) => setChecks(data.checks))
-      .catch(() => setErrMsg("Impossible de contacter le serveur pour le diagnostic."));
-  }, []);
-
-  if (errMsg) {
-    return (
-      <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 text-sm text-yellow-800">
-        <svg className="w-4 h-4 text-yellow-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
-        </svg>
-        <span>{errMsg}</span>
-      </div>
-    );
-  }
-
-  if (!checks) {
-    return (
-      <div className="flex items-center justify-center py-4 text-gray-400 text-sm gap-2">
-        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-        </svg>
-        Diagnostic en cours...
-      </div>
-    );
-  }
-
-  const allOk   = Object.values(checks).every((c) => c.ok);
-  const failCnt = Object.values(checks).filter((c) => !c.ok).length;
-
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-1.5">
-        {Object.entries(checks).map(([key, check]) => (
-          <div
-            key={key}
-            className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm
-              ${check.ok ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-base leading-none">{check.ok ? "✅" : "❌"}</span>
-              <span className="font-medium">{PREFLIGHT_LABELS[key] || key}</span>
-            </div>
-            <span className="text-xs opacity-75 text-right max-w-[50%] truncate" title={check.detail}>
-              {check.detail}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {!allOk && (
-        <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 text-sm text-yellow-800">
-          <svg className="w-4 h-4 text-yellow-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
-          </svg>
-          <span>
-            {failCnt} {failCnt === 1 ? "point" : "points"} non satisfait{failCnt > 1 ? "s" : ""}.
-            Vous pouvez continuer l'installation et corriger plus tard.
-          </span>
-        </div>
-      )}
-
-      {allOk && (
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5 text-sm text-green-800">
-          <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
-          </svg>
-          <span>Tous les pré-requis sont satisfaits.</span>
-        </div>
-      )}
-    </div>
-  );
-}
+const PREFLIGHT_LABELS = {
+  database:   "PostgreSQL",
+  disk_space: "Espace disque",
+  clamav:     "Antivirus",
+  grype:      "CVE Scanner",
+  secrets:    "Secrets",
+  tls:        "Certificat TLS",
+};
 
 function SetupWizard({ onDone }) {
   const [username, setUsername]   = useState("admin");
@@ -426,23 +355,20 @@ function SetupWizard({ onDone }) {
   const [appUrl, setAppUrl]       = useState(window.location.origin);
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
+  const [checks, setChecks]       = useState(null);
+
+  useEffect(() => {
+    getSetupPreflight()
+      .then((data) => setChecks(data.checks))
+      .catch(() => setChecks({}));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-
-    if (username.trim().length < 3) {
-      setError("Le nom d'utilisateur doit contenir au moins 3 caractères.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Le mot de passe doit contenir au moins 8 caractères.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Les mots de passe ne correspondent pas.");
-      return;
-    }
+    if (username.trim().length < 3) { setError("Nom d'utilisateur : 3 caractères minimum."); return; }
+    if (password.length < 8)        { setError("Mot de passe : 8 caractères minimum."); return; }
+    if (password !== confirm)       { setError("Les mots de passe ne correspondent pas."); return; }
 
     setLoading(true);
     try {
@@ -455,176 +381,147 @@ function SetupWizard({ onDone }) {
       onDone(data.access_token);
     } catch (err) {
       const status = err?.response?.status;
-      if (status === 409) {
-        setError("La configuration initiale a déjà été effectuée. Rechargez la page.");
-      } else {
-        setError(err?.response?.data?.detail || "Impossible de finaliser la configuration.");
-      }
+      if (status === 409) setError("Configuration deja effectuee. Rechargez la page.");
+      else setError(err?.response?.data?.detail || "Impossible de finaliser la configuration.");
     } finally {
       setLoading(false);
     }
   };
 
+  const allOk = checks && Object.values(checks).every((c) => c.ok);
+
   return (
-    <div className="space-y-4">
-      {/* Welcome header */}
-      <div className="bg-white rounded-2xl shadow-2xl p-8">
-        <div className="text-center mb-2">
-          <div className="inline-flex items-center justify-center mb-4">
-            <img src="/logo.png" alt="Repod" className="w-16 h-16 object-contain" />
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      {/* Header */}
+      <div className="px-8 pt-8 pb-6 border-b border-slate-100">
+        <div className="flex items-center gap-4">
+          <img src="/logo.png" alt="Repod" className="w-10 h-10 object-contain" />
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Configuration initiale</h1>
+            <p className="text-sm text-slate-500">Creez votre compte administrateur pour commencer.</p>
           </div>
-          <h1 className="text-2xl font-black tracking-wider text-gray-900 uppercase">Bienvenue sur Repod</h1>
-          <p className="text-sm text-gray-500 mt-2 leading-relaxed max-w-md mx-auto">
-            Gestionnaire de dépôts APT/RPM avec analyse de sécurité intégrée,
-            inventaire machines et déploiement à distance.
-          </p>
         </div>
       </div>
 
-      {/* Preflight checks */}
-      <div className="bg-white rounded-2xl shadow-xl p-6">
-        <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-          <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Diagnostic pré-installation
-        </h2>
-        <PreflightChecks />
-      </div>
-
-      {/* Setup form */}
-      <div className="bg-white rounded-2xl shadow-xl p-6">
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Admin account section */}
-          <div>
-            <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      <div className="flex flex-col lg:flex-row">
+        {/* Left: Preflight */}
+        <div className="lg:w-72 bg-slate-50 border-b lg:border-b-0 lg:border-r border-slate-100 p-6">
+          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Diagnostic systeme</h2>
+          {!checks ? (
+            <div className="flex items-center gap-2 text-sm text-slate-400">
+              <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
-              Compte administrateur
-            </h2>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nom d'utilisateur
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => { setUsername(e.target.value); setError(""); }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  autoFocus
-                  autoComplete="username"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Mot de passe
-                  </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => { setPassword(e.target.value); setError(""); }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="8 caractères min."
-                    autoComplete="new-password"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Confirmer
-                  </label>
-                  <input
-                    type="password"
-                    value={confirm}
-                    onChange={(e) => { setConfirm(e.target.value); setError(""); }}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    placeholder="Retapez le mot de passe"
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  E-mail <span className="text-gray-400 font-normal">(optionnel)</span>
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="admin@example.com"
-                  autoComplete="email"
-                />
-              </div>
+              Verification...
             </div>
-          </div>
-
-          {/* Separator */}
-          <div className="border-t border-gray-100" />
-
-          {/* Configuration section */}
-          <div>
-            <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-              <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              Configuration
-            </h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                URL publique de l'application
-              </label>
-              <input
-                type="url"
-                value={appUrl}
-                onChange={(e) => setAppUrl(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="https://repod.example.com"
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                Utilisée pour les notifications email et les liens. Modifiable plus tard dans les paramètres.
-              </p>
-            </div>
-          </div>
-
-          {error && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
-              <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-9v4a1 1 0 102 0V9a1 1 0 10-2 0zm0-4a1 1 0 112 0 1 1 0 01-2 0z" clipRule="evenodd"/>
-              </svg>
-              <p className="text-sm text-red-700">{error}</p>
+          ) : (
+            <div className="space-y-2">
+              {Object.entries(checks).map(([key, check]) => (
+                <div key={key} className="flex items-center gap-2.5">
+                  <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${
+                    check.ok ? "bg-emerald-100" : "bg-red-100"
+                  }`}>
+                    {check.ok ? (
+                      <svg className="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                      </svg>
+                    ) : (
+                      <svg className="w-3 h-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-slate-700">{PREFLIGHT_LABELS[key] || key}</div>
+                    <div className="text-[10px] text-slate-400 truncate" title={check.detail}>{check.detail}</div>
+                  </div>
+                </div>
+              ))}
+              {allOk && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Tout est operationnel
+                  </div>
+                </div>
+              )}
             </div>
           )}
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50
-                       disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg
-                       transition-colors text-sm"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        {/* Right: Form */}
+        <div className="flex-1 p-6 lg:p-8">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Nom d'utilisateur</label>
+              <input type="text" value={username}
+                onChange={(e) => { setUsername(e.target.value); setError(""); }}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                autoFocus autoComplete="username" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Mot de passe</label>
+                <input type="password" value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="8 caracteres min." autoComplete="new-password" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Confirmer</label>
+                <input type="password" value={confirm}
+                  onChange={(e) => { setConfirm(e.target.value); setError(""); }}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Retapez" autoComplete="new-password" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  E-mail <span className="text-slate-300 font-normal">(optionnel)</span>
+                </label>
+                <input type="email" value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="admin@example.com" autoComplete="email" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">URL publique</label>
+                <input type="url" value={appUrl}
+                  onChange={(e) => setAppUrl(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="https://repod.example.com" />
+              </div>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                 </svg>
-                Configuration en cours...
-              </span>
-            ) : "Finaliser l'installation"}
-          </button>
-        </form>
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+
+            <button type="submit" disabled={loading}
+              className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors text-sm">
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  Configuration...
+                </span>
+              ) : "Finaliser l'installation"}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
