@@ -20,9 +20,22 @@ export default function LoginPage() {
   const [needsSetup, setNeedsSetup] = useState(null); // null = loading, true/false
 
   useEffect(() => {
-    getSetupStatus()
-      .then((data) => setNeedsSetup(!!data.needs_setup))
-      .catch(() => setNeedsSetup(false));
+    let cancelled = false;
+    let retries = 0;
+    const check = () => {
+      getSetupStatus()
+        .then((data) => { if (!cancelled) setNeedsSetup(!!data.needs_setup); })
+        .catch(() => {
+          if (!cancelled && retries < 10) {
+            retries++;
+            setTimeout(check, 3000);
+          } else if (!cancelled) {
+            setNeedsSetup(false);
+          }
+        });
+    };
+    check();
+    return () => { cancelled = true; };
   }, []);
 
   const { signIn } = useAuth();
@@ -53,8 +66,8 @@ export default function LoginPage() {
         setError("Identifiant ou mot de passe incorrect.");
       } else if (status === 429) {
         setError("Trop de tentatives. Réessayez dans quelques minutes.");
-      } else if (!err?.response) {
-        setError("Le serveur n'est pas encore prêt. Patientez quelques secondes et réessayez.");
+      } else if (!err?.response || status === 502 || status === 503) {
+        setError("Le serveur est en cours de démarrage. Patientez quelques secondes et réessayez.");
       } else {
         setError(`Erreur serveur (${status}). Réessayez dans quelques instants.`);
       }
@@ -91,11 +104,12 @@ export default function LoginPage() {
   // ── Premier démarrage : aucun admin créé → assistant de configuration ──────
   if (needsSetup === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
-        <svg className="animate-spin w-8 h-8 text-white" fill="none" viewBox="0 0 24 24">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 gap-4">
+        <svg className="animate-spin w-8 h-8 text-violet-400" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
         </svg>
+        <p className="text-sm text-slate-400">Connexion au serveur en cours...</p>
       </div>
     );
   }
