@@ -100,7 +100,7 @@ def _extract_role(request: Request) -> str:
         data = decode_token(token)
         if data:
             return data.get("role", _DEFAULT_ROLE)
-    except Exception:
+    except (ValueError, KeyError):
         pass
     return _DEFAULT_ROLE
 
@@ -116,7 +116,7 @@ def _extract_username(request: Request) -> str | None:
         data = decode_token(token)
         if data:
             return data.get("username")
-    except Exception:
+    except (ValueError, KeyError):
         pass
     return None
 

@@ -102,6 +102,7 @@ function isTokenValid(token) {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }) {
+  const [sessionWarning, setSessionWarning] = useState(false);
   const [token, setToken] = useState(() => {
     const stored = localStorage.getItem("token");
     return isTokenValid(stored) ? stored : null;
@@ -158,8 +159,12 @@ export function AuthProvider({ children }) {
     let lastActivity = Date.now();
     const REFRESH_INTERVAL = 45 * 60 * 1000;
     const INACTIVITY_LIMIT = 120 * 60 * 1000;
+    const WARNING_BEFORE   =   5 * 60 * 1000;
 
-    const trackActivity = () => { lastActivity = Date.now(); };
+    const trackActivity = () => {
+      lastActivity = Date.now();
+      setSessionWarning(false);
+    };
     window.addEventListener("mousemove", trackActivity);
     window.addEventListener("keydown", trackActivity);
     window.addEventListener("click", trackActivity);
@@ -167,16 +172,25 @@ export function AuthProvider({ children }) {
     const interval = setInterval(async () => {
       const idle = Date.now() - lastActivity;
       if (idle > INACTIVITY_LIMIT) {
+        setSessionWarning(false);
         signOut();
         window.location.href = "/login";
         return;
+      }
+      if (idle > INACTIVITY_LIMIT - WARNING_BEFORE) {
+        setSessionWarning(true);
       }
       try {
         const data = await refreshToken();
         if (data?.access_token) {
           signIn(data.access_token);
         }
-      } catch {}
+      } catch (err) {
+        if (err?.response?.status === 401) {
+          signOut();
+          window.location.href = "/login";
+        }
+      }
     }, REFRESH_INTERVAL);
 
     return () => {
@@ -191,6 +205,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       token, user, signIn, signOut,
       can, isAdmin, isMaintainer, isAuditor, isReadOnly,
+      sessionWarning,
     }}>
       {children}
     </AuthContext.Provider>

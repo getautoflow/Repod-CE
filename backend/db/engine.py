@@ -52,7 +52,10 @@ def get_engine():
         pool_recycle=1800,        # recycle les connexions toutes les 30 min
         echo=os.getenv("SQL_ECHO", "").lower() in ("1", "true"),
     )
-    logger.info("[db] Moteur PostgreSQL initialisé — pool_size=10 max_overflow=20")
+    from urllib.parse import urlparse
+    _parsed = urlparse(url)
+    _safe = f"{_parsed.scheme}://{_parsed.hostname}:{_parsed.port or 5432}/{_parsed.path.lstrip('/')}"
+    logger.info("[db] Moteur PostgreSQL initialisé — %s pool_size=10 max_overflow=20", _safe)
     return _engine
 
 

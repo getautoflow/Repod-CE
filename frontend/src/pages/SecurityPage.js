@@ -2382,66 +2382,6 @@ export default function SecurityPage() {
         )}
       </div>
 
-      {/* Pipeline de sécurité */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6">
-        <h2 className="text-sm font-semibold text-gray-800 mb-4">Pipeline de sécurité à l'import</h2>
-        <div className="space-y-3">
-          {[
-            {
-              step: "1",
-              name: "Format .deb",
-              desc: "Vérification que le fichier est un paquet Debian valide via dpkg-deb.",
-              color: "bg-blue-100 text-blue-700",
-              blocking: true,
-            },
-            {
-              step: "2",
-              name: "Provenance SHA256",
-              desc: "Comparaison du SHA256 du fichier téléchargé avec celui stocké dans Packages.gz. Protège contre les attaques man-in-the-middle.",
-              color: "bg-blue-100 text-blue-700",
-              blocking: true,
-            },
-            {
-              step: "3",
-              name: "Antivirus ClamAV",
-              desc: "Scan complet du binaire contre la base de signatures ClamAV. Détecte les malwares et virus connus.",
-              color: "bg-red-100 text-red-700",
-              blocking: true,
-            },
-            {
-              step: "4",
-              name: "Signature GPG",
-              desc: "Vérification de la signature GPG si un fichier .sig est présent. Non bloquant si absent.",
-              color: "bg-yellow-100 text-yellow-700",
-              blocking: false,
-            },
-            {
-              step: "5",
-              name: "Dépendances",
-              desc: "Vérification de la disponibilité des dépendances dans le dépôt interne. Non bloquant — avertissement uniquement.",
-              color: "bg-green-100 text-green-700",
-              blocking: false,
-            },
-          ].map((item) => (
-            <div key={item.step} className="flex items-start gap-4">
-              <span className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${item.color}`}>
-                {item.step}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-gray-800">{item.name}</p>
-                  {item.blocking ? (
-                    <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded font-medium">Bloquant</span>
-                  ) : (
-                    <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded font-medium">Avertissement</span>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 mt-0.5">{item.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

@@ -10,6 +10,8 @@ import {
   getApiBaseUrl,
   getGpgInfo,
   generateGpgKey,
+  listGroups,
+  listUsers,
 } from "../api";
 
 const API_URL = getApiBaseUrl();
@@ -843,6 +845,7 @@ export default function SettingsPage() {
       <SyncSection settings={settings} onChange={handleChange} />
       <SourcesSection settings={settings} onChange={handleChange} />
       <EmailSection settings={settings} onChange={handleChange} />
+      <NotificationRulesSection settings={settings} onChange={handleChange} />
       <RetentionSection settings={settings} onChange={handleChange} />
       <ValidationSection settings={settings} onChange={handleChange} />
       <CvePolicySection settings={settings} onChange={handleChange} />
@@ -982,6 +985,199 @@ function EmailSection({ settings, onChange }) {
             Si vide, l'email est envoyé aux destinataires configurés ci-dessus.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section Règles de notification ──────────────────────────────────────────
+
+const EVENT_META = {
+  pending_review:   { label: "Paquet en révision RSSI",  desc: "Importé mais bloqué par une CVE — décision RSSI requise" },
+  escalation:       { label: "Escalade RSSI",             desc: "Un opérateur escalade une CVE non patchable vers le RSSI" },
+  decision_taken:   { label: "Décision prise",            desc: "Un RSSI enregistre une décision CVE (acceptation, rejet…)" },
+  sla_expiring:     { label: "SLA expirant",              desc: "Décisions CVE qui expirent dans les 7 prochains jours" },
+  patch_available:  { label: "Correctif disponible",      desc: "Le patch demandé par le RSSI est désormais importé dans le dépôt" },
+  cve_assignment:   { label: "Assignation CVE",           desc: "Une décision CVE est assignée à un utilisateur ou groupe" },
+};
+
+const ROLE_OPTIONS = [
+  { value: "admin",      label: "Administrateur" },
+  { value: "maintainer", label: "Mainteneur" },
+  { value: "uploader",   label: "Importateur" },
+  { value: "auditor",    label: "Auditeur" },
+  { value: "reader",     label: "Lecteur" },
+];
+
+const DYNAMIC_TYPES = ["assigned_to", "escalated_by", "decided_by"];
+const DYNAMIC_LABELS = {
+  assigned_to:  "Assigné à (résolu à l'envoi)",
+  escalated_by: "Escaladé par (résolu à l'envoi)",
+  decided_by:   "Décidé par (résolu à l'envoi)",
+};
+
+function RecipientBadge({ rec, onRemove }) {
+  const labels = {
+    role: `Rôle: ${rec.value}`, group: `Groupe: ${rec.value}`,
+    user: `User: ${rec.value}`, email: rec.value,
+    assigned_to: "Assigné à", escalated_by: "Escaladé par", decided_by: "Décidé par",
+  };
+  return (
+    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700">
+      {labels[rec.type] || `${rec.type}: ${rec.value || ""}`}
+      <button onClick={onRemove} className="ml-0.5 hover:opacity-70 leading-none">×</button>
+    </span>
+  );
+}
+
+function AddRecipientForm({ onAdd, groups, users }) {
+  const [type, setType]   = useState("role");
+  const [value, setValue] = useState("");
+  const isDynamic = DYNAMIC_TYPES.includes(type);
+  const handleAdd = () => {
+    if (!isDynamic && !value.trim()) return;
+    onAdd({ type, value: isDynamic ? "" : value.trim() });
+    setValue("");
+  };
+  return (
+    <div className="flex items-center gap-2 mt-2 flex-wrap">
+      <select value={type} onChange={e => { setType(e.target.value); setValue(""); }}
+        className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 bg-white">
+        <optgroup label="Statique">
+          <option value="role">Rôle</option>
+          <option value="group">Groupe</option>
+          <option value="user">Utilisateur</option>
+          <option value="email">Email direct</option>
+        </optgroup>
+        <optgroup label="Dynamique (résolu à l'envoi)">
+          <option value="assigned_to">Assigné à</option>
+          <option value="escalated_by">Escaladé par</option>
+          <option value="decided_by">Décidé par</option>
+        </optgroup>
+      </select>
+      {!isDynamic && type === "role" && (
+        <select value={value} onChange={e => setValue(e.target.value)}
+          className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 bg-white">
+          <option value="">— Choisir un rôle —</option>
+          {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+      )}
+      {!isDynamic && type === "group" && (
+        <select value={value} onChange={e => setValue(e.target.value)}
+          className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 bg-white">
+          <option value="">— Choisir un groupe —</option>
+          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+      )}
+      {!isDynamic && type === "user" && (
+        <select value={value} onChange={e => setValue(e.target.value)}
+          className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 bg-white">
+          <option value="">— Choisir un utilisateur —</option>
+          {users.map(u => <option key={u.username} value={u.username}>{u.username}{u.email ? ` (${u.email})` : ""}</option>)}
+        </select>
+      )}
+      {!isDynamic && type === "email" && (
+        <input type="email" value={value} onChange={e => setValue(e.target.value)}
+          placeholder="nom@exemple.com"
+          className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 w-48"
+          onKeyDown={e => e.key === "Enter" && handleAdd()} />
+      )}
+      {isDynamic && <span className="text-xs text-gray-500 italic">{DYNAMIC_LABELS[type]}</span>}
+      <button onClick={handleAdd}
+        className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+        Ajouter
+      </button>
+    </div>
+  );
+}
+
+function NotificationRulesSection({ settings, onChange }) {
+  const rules = settings?.notification_rules || [];
+  const [expandedEvent, setExpandedEvent] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [users, setUsers]   = useState([]);
+
+  useEffect(() => {
+    Promise.all([
+      listGroups().catch(() => ({ groups: [] })),
+      listUsers().catch(() => ({ users: [] })),
+    ]).then(([gRes, uRes]) => {
+      setGroups(gRes.groups || []);
+      setUsers(uRes.users || []);
+    });
+  }, []);
+
+  const getRule = (event) =>
+    rules.find(r => r.event === event) || { event, enabled: true, recipients: [] };
+
+  const updateRules = (event, patch) => {
+    const existing = rules.find(r => r.event === event);
+    let updated;
+    if (existing) {
+      updated = rules.map(r => r.event === event ? { ...r, ...patch } : r);
+    } else {
+      updated = [...rules, { event, enabled: true, recipients: [], ...patch }];
+    }
+    onChange("notification_rules", updated);
+  };
+
+  const toggleEvent = (event, enabled) => updateRules(event, { enabled });
+  const addRecipient = (event, rec) => {
+    const rule = getRule(event);
+    updateRules(event, { recipients: [...rule.recipients, rec] });
+  };
+  const removeRecipient = (event, idx) => {
+    const rule = getRule(event);
+    updateRules(event, { recipients: rule.recipients.filter((_, i) => i !== idx) });
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100">
+        <h2 className="text-base font-semibold text-gray-900">Règles de notification par événement</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Définissez qui reçoit les alertes pour chaque type d'événement.
+        </p>
+      </div>
+      <div className="divide-y divide-gray-100">
+        {Object.entries(EVENT_META).map(([event, meta]) => {
+          const rule    = getRule(event);
+          const enabled = rule.enabled !== false;
+          const isOpen  = expandedEvent === event;
+          return (
+            <div key={event} className="px-6 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-gray-700">{meta.label}</span>
+                    <div className="flex flex-wrap gap-1">
+                      {rule.recipients.map((rec, idx) => (
+                        <RecipientBadge key={idx} rec={rec} onRemove={() => removeRecipient(event, idx)} />
+                      ))}
+                      {rule.recipients.length === 0 && enabled && (
+                        <span className="text-xs text-gray-400 italic">Aucun destinataire — repli sur l'adresse to_addresses</span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">{meta.desc}</p>
+                  {isOpen && <AddRecipientForm onAdd={(rec) => addRecipient(event, rec)} groups={groups} users={users} />}
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button onClick={() => setExpandedEvent(isOpen ? null : event)}
+                    className="text-xs px-2.5 py-1 border border-gray-300 rounded-lg text-gray-500 hover:bg-gray-50 hover:border-blue-300 hover:text-blue-600 transition-colors">
+                    {isOpen ? "Fermer" : "+ Ajouter"}
+                  </button>
+                  <Toggle checked={enabled} onChange={(v) => toggleEvent(event, v)} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
+        <p className="text-xs text-gray-400">
+          Si aucune règle n'est configurée pour un événement, les emails sont envoyés aux <strong>Destinataires</strong> configurés dans la section SMTP.
+        </p>
       </div>
     </div>
   );

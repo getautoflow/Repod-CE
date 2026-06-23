@@ -25,7 +25,7 @@ def _row_to_dict(row) -> dict:
         if isinstance(d.get(field), str):
             try:
                 d[field] = json.loads(d[field])
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 d[field] = []
     return d
 

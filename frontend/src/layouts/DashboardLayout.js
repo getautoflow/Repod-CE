@@ -694,7 +694,7 @@ function MonCompteModal({ onClose }) {
 
 // ─── Layout principal ─────────────────────────────────────────────────────────
 export default function DashboardLayout() {
-  const { signOut, user } = useAuth();
+  const { signOut, user, sessionWarning } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [showMonCompte, setShowMonCompte] = useState(false);
@@ -937,6 +937,11 @@ export default function DashboardLayout() {
 
         {/* ── Contenu de la page ── */}
         <main className="flex-1 overflow-y-auto flex flex-col bg-slate-50">
+          {sessionWarning && (
+            <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-sm text-amber-800 font-medium">
+              Votre session expire dans 5 minutes. Bougez la souris ou cliquez pour rester connect&eacute;.
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

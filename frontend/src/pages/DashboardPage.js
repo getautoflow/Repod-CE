@@ -2,9 +2,13 @@ import { useState, useEffect, useCallback } from "react";
 import { getDashboardStats, getDashboardHistory, getEnrichedDashboard } from "../api";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
+import GridLayout, { WidthProvider } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
+
+const ReactGridLayout = WidthProvider(GridLayout);
 import {
   AreaChart, Area,
-  BarChart, Bar,
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell,
@@ -19,7 +23,6 @@ const fmtBytes = b => {
   if (b < 1_073_741_824) return `${(b / 1_048_576).toFixed(1)} MB`;
   return `${(b / 1_073_741_824).toFixed(2)} GB`;
 };
-
 
 const fmtNum = n => {
   if (n == null) return "—";
@@ -77,6 +80,11 @@ const STATUS_META = {
   upgrade_required: { label: "Upgrade requis", color: C.teal   },
 };
 
+const ACTION_COLOR = {
+  UPLOAD: C.blue, IMPORT: C.teal,
+  PENDING_REVIEW: C.orange, SECURITY_DECISION: C.purple,
+};
+
 const ALERT_STYLE = {
   deps_missing: { bg: "#FDE68A", border: "#D97706", text: "#92400E" },
   sla_warning:  { bg: "#FDE68A", border: "#D97706", text: "#92400E" },
@@ -93,15 +101,47 @@ const PERIODS = [
 const PER_PAGE = 10;
 
 // ─── Panel wrapper ─────────────────────────────────────────────────────────────
-// Generic card container. `fixed` passes a CSS height string for chart panels.
-function Panel({ title, children, badge, icon, onAction, actionLabel, fixed, className = "" }) {
+// ─── Grid layout ──────────────────────────────────────────────────────────────
+const LS_KEY = "repod_dashboard_layout_v4";
+const GRID_COLS = 15;
+const GRID_ROW_H = 65;
+
+const DEFAULT_LAYOUT = [
+  // ── Ligne 1 : KPI cards — 5 × w:3 = 15 cols (pleine largeur, dimensions égales) ──
+  { i: "kpi-paquets",    x: 0,  y: 0,  w: 3,  h: 3, minW: 2, minH: 2 },
+  { i: "kpi-imports",    x: 3,  y: 0,  w: 3,  h: 3, minW: 2, minH: 2 },
+  { i: "kpi-cves",       x: 6,  y: 0,  w: 3,  h: 3, minW: 2, minH: 2 },
+  { i: "kpi-rssi",       x: 9,  y: 0,  w: 3,  h: 3, minW: 2, minH: 2 },
+  { i: "kpi-alertes",    x: 12, y: 0,  w: 3,  h: 3, minW: 2, minH: 2 },
+  // ── Ligne 2 : 3 vues de distribution — 3 × w:5 = 15, h:5 ───────────────────
+  { i: "rssi-donut",     x: 0,  y: 3,  w: 5,  h: 5, minW: 3, minH: 3 },
+  { i: "cve-dist",       x: 5,  y: 3,  w: 5,  h: 5, minW: 3, minH: 3 },
+  { i: "clamav",         x: 10, y: 3,  w: 5,  h: 5, minW: 2, minH: 3 },
+  // ── Ligne 3 : historique + SLA violations ───────────────────────────────────
+  { i: "history",        x: 0,  y: 8,  w: 12, h: 5, minW: 4, minH: 3 },
+  { i: "sla-violations", x: 12, y: 8,  w: 3,  h: 5, minW: 2, minH: 3 },
+  // ── Ligne 4 : tendances CVE ──────────────────────────────────────────────────
+  { i: "cve-trends",     x: 0,  y: 13, w: 15, h: 5, minW: 4, minH: 3 },
+  // ── Ligne 5 : alertes système ────────────────────────────────────────────────
+  { i: "alerts",         x: 0,  y: 18, w: 15, h: 6, minW: 6, minH: 3 },
+  // ── Ligne 6 : activité récente ───────────────────────────────────────────────
+  { i: "imports-table",  x: 0,  y: 24, w: 15, h: 9, minW: 6, minH: 4 },
+];
+
+function loadSavedLayout() {
+  try {
+    const s = localStorage.getItem(LS_KEY);
+    if (s) return JSON.parse(s);
+  } catch {}
+  return DEFAULT_LAYOUT;
+}
+
+// Generic card container — h-full to fill its grid cell.
+function Panel({ title, children, badge, icon, onAction, actionLabel, className = "" }) {
   return (
-    <div
-      style={fixed ? { height: fixed } : undefined}
-      className={`bg-white border border-slate-200 rounded-xl flex flex-col shadow-[0_1px_3px_rgba(0,0,0,0.06)] overflow-hidden ${className}`}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 flex-shrink-0">
+    <div className={`bg-white border border-slate-200 rounded-xl flex flex-col h-full shadow-[0_1px_3px_rgba(0,0,0,0.06)] overflow-hidden ${className}`}>
+      {/* Header — drag handle */}
+      <div className="drag-handle flex items-center justify-between px-4 py-2.5 border-b border-slate-100 flex-shrink-0 cursor-grab active:cursor-grabbing select-none">
         <div className="flex items-center gap-2 min-w-0">
           {icon && <span className="text-slate-400 flex-shrink-0 flex">{icon}</span>}
           <span className="text-[10px] font-bold tracking-[0.07em] uppercase text-slate-500 truncate">
@@ -118,15 +158,15 @@ function Panel({ title, children, badge, icon, onAction, actionLabel, fixed, cla
         </div>
         {onAction && (
           <button
-            onClick={onAction}
+            onClick={(e) => { e.stopPropagation(); onAction(); }}
             style={{ color: C.blue }}
-            className="text-[11px] font-semibold flex-shrink-0 pl-3 hover:opacity-75 transition-opacity"
+            className="text-[11px] font-semibold flex-shrink-0 pl-3 hover:opacity-75 transition-opacity cursor-pointer"
           >
             {actionLabel || "Voir →"}
           </button>
         )}
       </div>
-      {/* Body — flex-1 + min-h-0 allows Recharts ResponsiveContainer to fill correctly */}
+      {/* Body */}
       <div className="flex-1 min-h-0 overflow-hidden p-4">
         {children}
       </div>
@@ -134,41 +174,56 @@ function Panel({ title, children, badge, icon, onAction, actionLabel, fixed, cla
   );
 }
 
-// ─── KPI Card palettes — fond coloré, valeur claire (inversion) ───────────────
+// ─── KPI Card palettes — style GLPI : fond coloré vif, texte assombri ──────────
 const KPI_PALETTES = {
-  paquets: { bg: "#4a86d4", value: "#ddeeff", sub: "#b8d4f5" },
-  imports: { bg: "#2ea05a", value: "#d4f5e4", sub: "#a8e8c4" },
-  cves:    { bg: "#d94040", value: "#fde8e8", sub: "#f5c0c0" },
-  rssi:    { bg: "#d98e2a", value: "#fff3dc", sub: "#fad8a0" },
-  alertes: { bg: "#d94040", value: "#fde8e8", sub: "#f5c0c0" },
+  paquets: { bg: "#f5c5c5", color: "#7f1d1d" },  // rouge corail → Computers GLPI
+  imports: { bg: "#b8e6b8", color: "#14532d" },  // vert moyen   → Software GLPI
+  cves:    { bg: "#b8d4e8", color: "#1e3a5f" },  // bleu ciel    → Network GLPI
+  rssi:    { bg: "#f5e6a3", color: "#713f12" },  // ambre doré   → Racks GLPI
+  alertes: { bg: "#a8d5d0", color: "#134e4a" },  // teal         → Enclosures GLPI
 };
 
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, palette, onClick }) {
+// ─── KPI Card — style GLPI ────────────────────────────────────────────────────
+function KpiCard({ label, value, sub, palette, onClick, icon }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      style={{ background: palette.bg }}
+      className="h-full rounded-lg shadow-sm flex flex-col overflow-hidden"
+    >
+      {/* Drag handle sur le haut de la carte */}
+      <div className="drag-handle h-6 flex-shrink-0 cursor-grab active:cursor-grabbing select-none" />
       <div
         onClick={onClick}
-        style={{ background: palette.bg }}
-        className={`rounded-xl px-4 py-5 flex flex-col items-center justify-center gap-1.5
-          shadow-[0_2px_8px_rgba(0,0,0,0.18)] min-h-[110px]
-          ${onClick ? "cursor-pointer hover:brightness-110" : ""} transition-all`}
+        className={`flex-1 px-5 pb-5 flex flex-col justify-between min-h-0
+          ${onClick ? "cursor-pointer hover:brightness-95" : ""}
+          transition-all duration-150`}
       >
-        <div
-          style={{ color: palette.value }}
-          className="text-[46px] font-extrabold leading-none tabular-nums"
+      {/* Haut : valeur + icône */}
+      <div className="flex items-start justify-between gap-2">
+        <span
+          style={{ color: palette.color }}
+          className="text-[46px] font-light leading-none tabular-nums tracking-tight"
         >
           {value != null ? fmtNum(value) : "—"}
-        </div>
+        </span>
+        {icon && (
+          <span style={{ color: palette.color }} className="opacity-40 mt-1 shrink-0">
+            {icon}
+          </span>
+        )}
+      </div>
+      {/* Bas : sous-titre + label */}
+      <div>
         {sub && (
-          <p style={{ color: palette.sub }} className="text-[12px] font-medium text-center leading-tight">
+          <p style={{ color: palette.color }} className="text-[11px] font-medium mb-1 opacity-60 leading-tight">
             {sub}
           </p>
         )}
+        <p style={{ color: palette.color }} className="text-sm font-bold">
+          {label}
+        </p>
       </div>
-      <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500 text-center">
-        {label}
-      </p>
+      </div>
     </div>
   );
 }
@@ -363,73 +418,118 @@ function SecurityDonut({ review, onNavigate }) {
           </div>
         ))}
 
-        {expiring.length > 0 && (
-          <div
-            style={{ borderTop: `1px solid ${C.border}` }}
-            className="pt-2 mt-1"
-          >
-            <p
-              style={{ color: C.orange }}
-              className="text-[9px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-              </svg>
-              Décisions expirantes
-            </p>
-            {expiring.slice(0, 3).map((item, i) => (
-              <div
-                key={i}
-                style={{
-                  background: item.expired ? "#FEF2F2" : "#FFF7ED",
-                  border: `1px solid ${item.expired ? C.red + "25" : C.orange + "25"}`,
-                }}
-                className="flex justify-between items-center px-2 py-1 rounded mb-1 text-[10px]"
-              >
-                <span className="font-mono font-semibold truncate" style={{ color: C.text }}>
-                  {item.package}
-                </span>
-                <span
-                  style={{ color: item.expired ? C.red : C.orange }}
-                  className="font-bold flex-shrink-0 ml-2"
-                >
-                  {item.expired ? "Expirée" : `J-${item.remaining_days}`}
-                </span>
-              </div>
-            ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ClamAV panel — menaces bloquées (style RSSI) ─────────────────────────────
+function ClamavPanel({ clamav }) {
+  if (!clamav) return null;
+
+  const count     = clamav.detections_total ?? 0;
+  const ok        = clamav.available && clamav.daemon_running;
+  const color     = count > 0 ? "#DC2626" : "#16a34a";
+
+  // Âge base de signatures en jours
+  let dbAgeDays = null;
+  if (clamav.db_date) {
+    try {
+      const dbDate = new Date(clamav.db_date);
+      dbAgeDays = Math.floor((Date.now() - dbDate.getTime()) / 86_400_000);
+    } catch {}
+  }
+  const dbAgeColor = dbAgeDays == null ? C.muted
+    : dbAgeDays <= 3  ? "#16a34a"
+    : dbAgeDays <= 7  ? C.yellow
+    : C.red;
+
+  // Dernière détection
+  let lastDetectLabel = null;
+  if (clamav.last_detection) {
+    try {
+      const d = new Date(clamav.last_detection);
+      const daysAgo = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+      lastDetectLabel = daysAgo === 0 ? "aujourd'hui"
+        : daysAgo === 1 ? "il y a 1 jour"
+        : `il y a ${daysAgo} jours`;
+    } catch {}
+  }
+
+  return (
+    <div className="h-full flex flex-col items-center text-center px-4" style={{ paddingTop: "1.75rem" }}>
+      {/* Nombre */}
+      <div style={{ color }} className="text-[64px] font-light leading-none tabular-nums tracking-tight">
+        {count}
+      </div>
+      {/* Label — minHeight identique à SlaViolationsPanel pour aligner le séparateur */}
+      <div className="text-[12px] text-slate-500 leading-snug mt-2 flex items-start justify-center"
+           style={{ minHeight: "2.5rem" }}>
+        menace{count !== 1 ? "s" : ""} bloquée{count !== 1 ? "s" : ""}
+      </div>
+      {/* Séparateur */}
+      <div className="w-10 border-t border-slate-200 mt-1 mb-3 flex-shrink-0" />
+      {/* Méta antivirus */}
+      <div className="flex flex-col items-center gap-1 text-[11px]">
+        <div className="flex items-center justify-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+            style={{ background: ok ? "#16a34a" : C.red }} />
+          <span className="text-slate-500">
+            {ok ? "Antivirus actif" : clamav.available ? "Sans daemon" : "Inactif"}
+          </span>
+        </div>
+        {dbAgeDays != null && (
+          <div style={{ color: dbAgeColor }} className="font-medium">
+            Base {dbAgeDays === 0 ? "à jour (aujourd'hui)"
+              : dbAgeDays === 1 ? "mise à jour il y a 1 jour"
+              : `mise à jour il y a ${dbAgeDays} j`}
+            {clamav.db_version ? ` · v${clamav.db_version}` : ""}
           </div>
+        )}
+        {count > 0 && lastDetectLabel ? (
+          <div className="text-slate-400">
+            Dernière : <span className="font-mono text-slate-600">{clamav.last_package}</span>{" "}
+            <span style={{ color: C.red }}>{lastDetectLabel}</span>
+          </div>
+        ) : (
+          <div className="text-slate-400">Aucune menace détectée</div>
         )}
       </div>
     </div>
   );
 }
 
-// ─── ClamAV status panel ───────────────────────────────────────────────────────
-function ClamavPanel({ clamav }) {
-  if (!clamav) return null;
-  const ok          = clamav.available && clamav.daemon_running;
-  const statusColor = ok ? "#16a34a" : clamav.available ? C.yellow : C.red;
-  const statusLabel = ok ? "Actif" : clamav.available ? "Sans daemon" : "Inactif";
-
+// ─── SLA Violations panel ─────────────────────────────────────────────────────
+function SlaViolationsPanel({ slaOverdue, onNavigate }) {
+  const count = slaOverdue?.length || 0;
+  const color = count > 0 ? "#DC2626" : "#16a34a";
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
-      <div
-        style={{ color: statusColor }}
-        className="text-[26px] font-extrabold leading-tight tracking-tight"
-      >
-        Antivirus {statusLabel}
+    <div className="h-full flex flex-col items-center text-center px-4" style={{ paddingTop: "1.75rem" }}>
+      {/* Nombre */}
+      <div style={{ color }} className="text-[64px] font-light leading-none tabular-nums tracking-tight">
+        {count}
       </div>
-      {clamav.db_version && (
-        <div className="text-[11px] text-slate-400 font-mono">
-          DB v{clamav.db_version}
-        </div>
-      )}
-      {clamav.db_date && (
-        <div className="text-[11px] text-slate-400 font-mono -mt-2">
-          {clamav.db_date.slice(0, 10)}
-        </div>
-      )}
+      {/* Label — minHeight identique à ClamAV pour aligner le séparateur */}
+      <div className="text-[12px] text-slate-500 leading-snug mt-2 flex items-start justify-center"
+           style={{ minHeight: "2.5rem" }}>
+        paquet{count !== 1 ? "s" : ""} dépass{count !== 1 ? "ent" : "e"} le SLA de révision
+      </div>
+      {/* Séparateur */}
+      <div className="w-10 border-t border-slate-200 mt-1 mb-3 flex-shrink-0" />
+      {/* Action */}
+      <div className="flex flex-col items-center gap-1 text-[11px]">
+        {count > 0 ? (
+          <button
+            onClick={onNavigate}
+            style={{ color: "#DC2626", background: "#FEF2F2", border: "1px solid #FECACA" }}
+            className="text-[11px] font-semibold px-3 py-1 rounded-lg hover:opacity-80 transition-opacity cursor-pointer"
+          >
+            Traiter →
+          </button>
+        ) : (
+          <span className="text-slate-400">Aucun SLA dépassé</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -502,16 +602,12 @@ function ImportsTable({ imports, page, onPageChange }) {
 
   return (
     <div className="flex flex-col">
-      {/* -m-4 cancels Panel's p-4 so table spans full width */}
       <div className="overflow-x-auto -mx-4 -mt-4">
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50/80">
               {["Paquet", "Version", "Action", "Date", "Statut"].map(h => (
-                <th
-                  key={h}
-                  className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-400"
-                >
+                <th key={h} className="px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   {h}
                 </th>
               ))}
@@ -521,10 +617,7 @@ function ImportsTable({ imports, page, onPageChange }) {
             {rows.map((e, i) => {
               const ok = e.result === "SUCCESS";
               return (
-                <tr
-                  key={i}
-                  className="border-b border-slate-50 hover:bg-slate-50/70 transition-colors"
-                >
+                <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/70 transition-colors">
                   <td className="px-4 py-2.5 font-mono font-semibold" style={{ color: C.text }}>
                     {e.package || "—"}
                   </td>
@@ -549,10 +642,7 @@ function ImportsTable({ imports, page, onPageChange }) {
         </table>
       </div>
       {pages > 1 && (
-        <Paginator
-          page={page} pages={pages} total={total}
-          perPage={PER_PAGE} onPageChange={onPageChange}
-        />
+        <Paginator page={page} pages={pages} total={total} perPage={PER_PAGE} onPageChange={onPageChange} />
       )}
     </div>
   );
@@ -578,7 +668,7 @@ function CveTrendsChart({ trends }) {
         <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.sub }} />
-          <YAxis tick={{ fontSize: 11, fill: C.sub }} width={32} />
+          <YAxis tick={{ fontSize: 11, fill: C.sub }} width={48} />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8, border: `1px solid ${C.border}` }}
           />
@@ -616,7 +706,17 @@ export default function DashboardPage() {
   const [lastRefresh, setLast]        = useState(null);
   const [period,      setPeriod]      = useState(30);
   const [importsPage, setImportsPage] = useState(1);
+  const [layout,      setLayout]      = useState(loadSavedLayout);
   const navigate = useNavigate();
+
+  const handleLayoutChange = (newLayout) => {
+    setLayout(newLayout);
+    localStorage.setItem(LS_KEY, JSON.stringify(newLayout));
+  };
+  const resetLayout = () => {
+    setLayout(DEFAULT_LAYOUT);
+    localStorage.removeItem(LS_KEY);
+  };
 
   // Full reload — stats + history for selected period
   const load = useCallback(async (silent = false) => {
@@ -716,6 +816,15 @@ export default function DashboardPage() {
             ))}
           </div>
 
+          {/* Reset layout */}
+          <button
+            onClick={resetLayout}
+            className="text-[11px] font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+            title="Réinitialiser la disposition"
+          >
+            Réinitialiser la vue
+          </button>
+
           {/* Refresh */}
           <button
             onClick={() => load(false)}
@@ -737,181 +846,163 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Row 1 — KPI cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
-        <KpiCard
-          label="Paquets"
-          value={packages?.total ?? 0}
-          sub={fmtBytes(packages?.total_size_bytes)}
-          palette={KPI_PALETTES.paquets}
-        />
-        <KpiCard
-          label="Imports"
-          value={packages?.imports_today ?? 0}
-          sub="ce jour"
-          palette={KPI_PALETTES.imports}
-        />
-        <KpiCard
-          label="CVEs"
-          value={totalCve}
-          sub={`${security_posture?.scanned ?? 0} paquets analysés`}
-          palette={KPI_PALETTES.cves}
-          onClick={() => navigate("/security")}
-        />
-        <KpiCard
-          label="RSSI"
-          value={needsAction > 0 ? needsAction : (security_review?.total_decisions ?? 0)}
-          sub={needsAction > 0 ? "action(s) requise(s)" : "décision(s) active(s)"}
-          palette={KPI_PALETTES.rssi}
-          onClick={() => navigate("/security")}
-        />
-        <KpiCard
-          label="Alertes"
-          value={alerts?.length ?? 0}
-          sub={!alerts?.length ? "Tout nominal" : "à traiter"}
-          palette={KPI_PALETTES.alertes}
-        />
-      </div>
+      {/* ── Grille déplaçable / redimensionnable ── */}
+      <ReactGridLayout
+        layout={layout}
+        cols={GRID_COLS}
+        rowHeight={GRID_ROW_H}
+        margin={[12, 12]}
+        containerPadding={[0, 0]}
+        draggableHandle=".drag-handle"
+        onLayoutChange={handleLayoutChange}
+        resizeHandles={["se"]}
+      >
+        {/* KPI Paquets */}
+        <div key="kpi-paquets">
+          <KpiCard label="Paquets" value={packages?.total ?? 0} sub={fmtBytes(packages?.total_size_bytes)}
+            palette={KPI_PALETTES.paquets}
+            icon={<svg className="w-9 h-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>}
+          />
+        </div>
 
-      {/* ── Row 2 — Temporal area chart ── */}
-      <div className="mb-4">
-        <Panel
-          fixed="240px"
-          title={`Historique — Imports & Échecs (${period === 1 ? "24 h" : `${period} j`})`}
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
-              strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          }
-        >
-          <HistoryChart data={history} />
-        </Panel>
-      </div>
+        {/* KPI Imports */}
+        <div key="kpi-imports">
+          <KpiCard label="Imports" value={packages?.imports_today ?? 0} sub="ce jour"
+            palette={KPI_PALETTES.imports}
+            icon={<svg className="w-9 h-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>}
+          />
+        </div>
 
-      {/* ── Row 3 — CVE distribution + Security donut + ClamAV ── */}
-      <div className="grid grid-cols-12 gap-3 mb-4">
-        {/* CVE horizontal bars — 5/12 */}
-        <div className="col-span-12 md:col-span-6 lg:col-span-5">
-          <Panel
-            fixed="230px"
-            title="Distribution CVE — Grype"
-            icon={
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
-                strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-            }
-          >
+        {/* KPI CVEs */}
+        <div key="kpi-cves">
+          <KpiCard label="CVEs" value={totalCve} sub={`${security_posture?.scanned ?? 0} paquets analysés`}
+            palette={KPI_PALETTES.cves} onClick={() => navigate("/security")}
+            icon={<svg className="w-9 h-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>}
+          />
+        </div>
+
+        {/* KPI RSSI */}
+        <div key="kpi-rssi">
+          <KpiCard label="RSSI"
+            value={needsAction > 0 ? needsAction : (security_review?.total_decisions ?? 0)}
+            sub={needsAction > 0 ? "action(s) requise(s)" : "décision(s) active(s)"}
+            palette={KPI_PALETTES.rssi} onClick={() => navigate("/security")}
+            icon={<svg className="w-9 h-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>}
+          />
+        </div>
+
+        {/* KPI Alertes */}
+        <div key="kpi-alertes">
+          <KpiCard label="Alertes" value={alerts?.length ?? 0}
+            sub={!alerts?.length ? "Tout nominal" : "à traiter"}
+            palette={KPI_PALETTES.alertes}
+            icon={<svg className="w-9 h-9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.4}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>}
+          />
+        </div>
+
+        {/* Historique */}
+        <div key="history">
+          <Panel title={`Historique — Imports & Échecs (${period === 1 ? "24 h" : `${period} j`})`}
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>}>
+            <HistoryChart data={history} />
+          </Panel>
+        </div>
+
+        {/* SLA Violations */}
+        <div key="sla-violations">
+          <Panel title="SLA de révision"
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}>
+            <SlaViolationsPanel slaOverdue={enriched?.sla_overdue} onNavigate={() => navigate("/security")} />
+          </Panel>
+        </div>
+
+        {/* Distribution CVE */}
+        <div key="cve-dist">
+          <Panel title="Distribution CVE — Grype"
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}>
             <CveDistribution posture={security_posture} />
           </Panel>
         </div>
 
-        {/* Security review donut — 4/12 */}
-        <div className="col-span-12 md:col-span-6 lg:col-span-4">
-          <Panel
-            fixed="230px"
-            title="Révision RSSI"
-            badge={needsAction}
-            onAction={() => navigate("/security")}
-            icon={
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
-                strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-          >
+        {/* Révision RSSI */}
+        <div key="rssi-donut">
+          <Panel title="Révision RSSI" badge={needsAction} onAction={() => navigate("/security")}
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>}>
             <SecurityDonut review={security_review} onNavigate={() => navigate("/security")} />
           </Panel>
         </div>
 
-        {/* ClamAV — 3/12 */}
-        <div className="col-span-12 md:col-span-12 lg:col-span-3">
-          <Panel
-            fixed="230px"
-            title="ClamAV — Antivirus"
-            icon={
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
-                strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-              </svg>
-            }
-          >
+        {/* ClamAV */}
+        <div key="clamav">
+          <Panel title="ClamAV — Antivirus"
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>}>
             <ClamavPanel clamav={clamav} />
           </Panel>
         </div>
-      </div>
 
-      {/* ── Alerts banner (conditional — above imports table) ── */}
-      <AlertsBanner alerts={alerts} />
-
-      {/* ── SLA overdue banner ── */}
-      {enriched?.sla_overdue?.length > 0 && (
-        <div className="flex items-start gap-3 px-4 py-3 mb-4 bg-red-50 border border-red-200 rounded-xl">
-          <svg className="w-4 h-4 text-red-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24"
-            stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-          </svg>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-red-800">
-              {enriched.sla_overdue.length} paquet(s) dépassent le SLA de review
-            </p>
-            <div className="mt-1 flex flex-wrap gap-1">
-              {enriched.sla_overdue.slice(0, 6).map((p, i) => (
-                <span key={i}
-                  className="text-[11px] bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 rounded-full font-medium">
-                  {p.name}@{p.version} — {Math.round(p.age_days)}j
-                </span>
-              ))}
-              {enriched.sla_overdue.length > 6 && (
-                <span className="text-[11px] text-red-500">+{enriched.sla_overdue.length - 6} autres</span>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => navigate("/security")}
-            className="ml-auto shrink-0 text-[11px] font-medium text-red-600 hover:text-red-800 underline"
-          >
-            Traiter →
-          </button>
+        {/* Tendances CVE */}
+        <div key="cve-trends">
+          <Panel title="Tendances CVE — glissement 30/60/90 jours"
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>}>
+            {enriched?.cve_trends?.length
+              ? <CveTrendsChart trends={enriched.cve_trends} />
+              : <div className="flex items-center justify-center h-full text-xs text-slate-400">Aucune tendance disponible</div>}
+          </Panel>
         </div>
-      )}
 
-      {/* ── CVE Trends ── */}
-      {enriched?.cve_trends?.length > 0 && (
-        <Panel
-          title="Tendances CVE — glissement 30/60/90 jours"
-          className="mb-4"
-          icon={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
-              strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          }
-        >
-          <CveTrendsChart trends={enriched.cve_trends} />
-        </Panel>
-      )}
+        {/* Alertes système */}
+        <div key="alerts">
+          <Panel
+            title={`${alerts?.length || 0} alerte${alerts?.length !== 1 ? "s" : ""} système`}
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>}
+          >
+            {!alerts?.length ? (
+              <div className="flex items-center justify-center h-full text-xs text-slate-400">
+                Aucune alerte système
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 overflow-auto h-full">
+                {alerts.map((a, i) => {
+                  const style = ALERT_STYLE[a.type] || { bg: `${C.muted}18`, border: C.muted, text: C.muted };
+                  const isDepsMissing = a.type === "deps_missing";
+                  return (
+                    <div key={i}
+                      style={{ background: style.bg, borderLeft: `3px solid ${style.border}` }}
+                      className="flex items-start justify-between gap-2 px-3 py-2 rounded-r-lg"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p style={{ color: C.text }} className="text-[12px] font-semibold truncate">{a.package}</p>
+                        <p style={{ color: C.sub }} className="text-[11px] mt-px leading-tight">{a.message}</p>
+                        {isDepsMissing && a.deps?.length > 0 && (
+                          <p className="text-[10px] mt-0.5 font-mono truncate" style={{ color: style.text }}>
+                            {a.deps.join(", ")}
+                          </p>
+                        )}
+                      </div>
+                      {isDepsMissing && (
+                        <a href="/packages"
+                          className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md transition-opacity hover:opacity-70"
+                          style={{ color: style.text, background: "#D9770630" }}
+                        >
+                          Résoudre →
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
+        </div>
 
-      {/* ── Row 4 — Recent activity table ── */}
-      <Panel
-        title="Activité récente — imports"
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}
-            strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-            <polyline points="9 11 12 14 22 4" />
-            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-          </svg>
-        }
-        actionLabel="Voir tout →"
-        onAction={() => navigate("/packages")}
-      >
-        <ImportsTable
-          imports={recent_imports}
-          page={importsPage}
-          onPageChange={setImportsPage}
-        />
-      </Panel>
+        {/* Activité récente */}
+        <div key="imports-table">
+          <Panel title="Activité récente — imports" actionLabel="Voir tout →" onAction={() => navigate("/packages")}
+            icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>}>
+            <ImportsTable imports={recent_imports} page={importsPage} onPageChange={setImportsPage} />
+          </Panel>
+        </div>
+      </ReactGridLayout>
 
     </div>
   );

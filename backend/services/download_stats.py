@@ -116,7 +116,7 @@ def _parse_log() -> list[dict]:
                 dt       = datetime.strptime(m.group("time"), "%d/%b/%Y:%H:%M:%S %z")
                 date_str = dt.strftime("%Y-%m-%d")
                 hour     = dt.hour
-            except Exception:
+            except (ValueError, AttributeError):
                 date_str = "unknown"
                 hour     = 0
 

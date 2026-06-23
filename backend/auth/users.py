@@ -274,6 +274,7 @@ def reset_failed_logins(username: str) -> None:
 # ── MFA TOTP ──────────────────────────────────────────────────────────────────
 
 def get_mfa_info(username: str) -> dict:
+    from auth.totp_crypto import decrypt_totp_secret
     with db_conn() as conn:
         row = conn.execute(
             text(
@@ -286,16 +287,18 @@ def get_mfa_info(username: str) -> dict:
         return {"mfa_enabled": False, "totp_secret": None, "totp_pending_secret": None}
     return {
         "mfa_enabled":         bool(row["mfa_enabled"]),
-        "totp_secret":         row["totp_secret"],
-        "totp_pending_secret": row["totp_pending_secret"],
+        "totp_secret":         decrypt_totp_secret(row["totp_secret"]) if row["totp_secret"] else None,
+        "totp_pending_secret": decrypt_totp_secret(row["totp_pending_secret"]) if row["totp_pending_secret"] else None,
     }
 
 
 def set_mfa_pending_secret(username: str, secret: str) -> bool:
+    from auth.totp_crypto import encrypt_totp_secret
+    encrypted = encrypt_totp_secret(secret) if secret else secret
     with db_conn() as conn:
         result = conn.execute(
             text("UPDATE users SET totp_pending_secret = :s WHERE username = :u"),
-            {"s": secret, "u": username},
+            {"s": encrypted, "u": username},
         )
     return result.rowcount > 0
 
