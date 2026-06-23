@@ -953,11 +953,12 @@ function EmailSection({ settings, onChange }) {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Destinataires <span className="text-gray-400 font-normal normal-case">(séparés par des virgules)</span>
+            Destinataires par defaut <span className="text-gray-400 font-normal normal-case">(separes par des virgules)</span>
           </label>
           <input type="text" value={cfg.to_addresses || ""} onChange={e => set("to_addresses", e.target.value)}
             placeholder="rssi@example.com, admin@example.com"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300" />
+          <p className="text-xs text-gray-400 mt-1">Utilises lorsqu'aucune regle de notification specifique n'est configuree pour un evenement.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -1091,8 +1092,38 @@ function AddRecipientForm({ onAdd, groups, users }) {
   );
 }
 
+const DEFAULT_NOTIFICATION_RULES = [
+  { event: "pending_review", enabled: true, recipients: [
+    { type: "role", value: "admin" },
+    { type: "role", value: "maintainer" },
+  ]},
+  { event: "escalation", enabled: true, recipients: [
+    { type: "assigned_to" },
+    { type: "role", value: "admin" },
+  ]},
+  { event: "decision_taken", enabled: true, recipients: [
+    { type: "escalated_by" },
+    { type: "assigned_to" },
+  ]},
+  { event: "sla_expiring", enabled: true, recipients: [
+    { type: "role", value: "admin" },
+    { type: "assigned_to" },
+  ]},
+  { event: "patch_available", enabled: true, recipients: [
+    { type: "assigned_to" },
+    { type: "decided_by" },
+  ]},
+  { event: "cve_assignment", enabled: true, recipients: [
+    { type: "assigned_to" },
+  ]},
+];
+
 function NotificationRulesSection({ settings, onChange }) {
-  const rules = settings?.notification_rules || [];
+  const savedRules = settings?.notification_rules || [];
+  const rules = DEFAULT_NOTIFICATION_RULES.map(def => {
+    const saved = savedRules.find(r => r.event === def.event);
+    return saved || def;
+  });
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [groups, setGroups] = useState([]);
   const [users, setUsers]   = useState([]);
@@ -1155,7 +1186,7 @@ function NotificationRulesSection({ settings, onChange }) {
                         <RecipientBadge key={idx} rec={rec} onRemove={() => removeRecipient(event, idx)} />
                       ))}
                       {rule.recipients.length === 0 && enabled && (
-                        <span className="text-xs text-gray-400 italic">Aucun destinataire — repli sur l'adresse to_addresses</span>
+                        <span className="text-xs text-gray-400 italic">Aucun destinataire — les emails seront envoyes aux adresses par defaut (section SMTP)</span>
                       )}
                     </div>
                   </div>
