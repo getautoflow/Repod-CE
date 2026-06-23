@@ -25,6 +25,7 @@ import DockerfilePage from "./pages/DockerfilePage";
 import PromotionsPage from "./pages/PromotionsPage";
 import GroupsPage from "./pages/GroupsPage";
 import RolesPage from "./pages/RolesPage";
+import TemplatesPage from "./pages/TemplatesPage";
 
 export default function App() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="promotions"  element={<PromotionsPage />} />
             <Route path="groups"       element={<GroupsPage />} />
             <Route path="roles"        element={<RolesPage />} />
+            <Route path="templates"   element={<TemplatesPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

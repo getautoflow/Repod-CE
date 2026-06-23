@@ -31,16 +31,24 @@ router = APIRouter(prefix="/groups", tags=["Groups"])
 VALID_COLORS = {"blue", "green", "red", "purple", "yellow", "orange", "pink", "gray", "indigo", "teal"}
 
 
+VALID_ROLES = {"admin", "maintainer", "uploader", "auditor", "reader"}
+
+
 class GroupCreate(BaseModel):
-    name:        str
-    description: str = ""
-    color:       str = "blue"
+    name:         str
+    description:  str = ""
+    color:        str = "blue"
+    default_role: str | None = None
+
+
+_UNSET = "__unset__"
 
 
 class GroupUpdate(BaseModel):
-    name:        str | None = None
-    description: str | None = None
-    color:       str | None = None
+    name:         str | None = None
+    description:  str | None = None
+    color:        str | None = None
+    default_role: str | None = _UNSET
 
 
 class MemberAdd(BaseModel):
@@ -58,8 +66,11 @@ def create_new_group(body: GroupCreate, current_user: str = Depends(get_admin_us
         raise HTTPException(status_code=400, detail=f"Couleur invalide. Valeurs : {sorted(VALID_COLORS)}")
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="Le nom du groupe est obligatoire")
+    if body.default_role and body.default_role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role invalide. Valeurs : {sorted(VALID_ROLES)}")
     try:
-        group = create_group(body.name.strip(), body.description, body.color, current_user)
+        group = create_group(body.name.strip(), body.description, body.color, current_user,
+                             default_role=body.default_role)
     except Exception as exc:
         if "uq_groups_name" in str(exc) or "unique" in str(exc).lower():
             raise HTTPException(status_code=409, detail=f"Un groupe '{body.name}' existe déjà")
@@ -87,8 +98,12 @@ def update_one_group(group_id: str, body: GroupUpdate, current_user: str = Depen
         raise HTTPException(status_code=404, detail="Groupe introuvable")
     if body.color is not None and body.color not in VALID_COLORS:
         raise HTTPException(status_code=400, detail=f"Couleur invalide. Valeurs : {sorted(VALID_COLORS)}")
+    if body.default_role not in (_UNSET, None) and body.default_role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role invalide. Valeurs : {sorted(VALID_ROLES)}")
+    role_arg = ... if body.default_role == _UNSET else body.default_role
     try:
-        group = update_group(group_id, name=body.name, description=body.description, color=body.color)
+        group = update_group(group_id, name=body.name, description=body.description,
+                             color=body.color, default_role=role_arg)
     except Exception as exc:
         if "uq_groups_name" in str(exc) or "unique" in str(exc).lower():
             raise HTTPException(status_code=409, detail=f"Un groupe '{body.name}' existe déjà")

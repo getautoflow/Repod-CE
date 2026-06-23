@@ -33,21 +33,35 @@ function ColorDot({ color, size = 10 }) {
 }
 
 // ── Modal création/édition ────────────────────────────────────────────────────
+const ROLE_OPTIONS = [
+  { value: "",           label: "Aucun (pas d'héritage)" },
+  { value: "reader",     label: "Lecteur" },
+  { value: "auditor",    label: "Auditeur" },
+  { value: "uploader",   label: "Packager" },
+  { value: "maintainer", label: "Mainteneur" },
+  { value: "admin",      label: "Administrateur" },
+];
+
 function GroupModal({ group, onClose, onSaved }) {
   const [name, setName]               = useState(group?.name || "");
   const [description, setDescription] = useState(group?.description || "");
   const [color, setColor]             = useState(group?.color || "blue");
+  const [defaultRole, setDefaultRole] = useState(group?.default_role || "");
   const [saving, setSaving]           = useState(false);
 
   const handleSave = async () => {
     if (!name.trim()) { toast.error("Le nom est obligatoire"); return; }
     setSaving(true);
     try {
+      const payload = {
+        name: name.trim(), description, color,
+        default_role: defaultRole || null,
+      };
       if (group) {
-        await updateGroup(group.id, { name: name.trim(), description, color });
+        await updateGroup(group.id, payload);
         toast.success("Groupe mis à jour");
       } else {
-        await createGroup({ name: name.trim(), description, color });
+        await createGroup(payload);
         toast.success("Groupe créé");
       }
       onSaved();
@@ -106,6 +120,24 @@ function GroupModal({ group, onClose, onSaved }) {
                 />
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              Role par defaut
+            </label>
+            <select
+              value={defaultRole}
+              onChange={(e) => setDefaultRole(e.target.value)}
+              className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {ROLE_OPTIONS.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Les membres dont le role actuel est inferieur heriteront automatiquement de ce role.
+            </p>
           </div>
         </div>
 
@@ -340,6 +372,7 @@ export default function GroupsPage() {
                 <th className="px-6 py-3">Groupe</th>
                 <th className="px-4 py-3">Description</th>
                 <th className="px-4 py-3">Membres</th>
+                <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Créé par</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
@@ -366,6 +399,16 @@ export default function GroupsPage() {
                       </svg>
                       {group.member_count ?? 0}
                     </span>
+                  </td>
+                  {/* Role */}
+                  <td className="px-4 py-3">
+                    {group.default_role ? (
+                      <span className="text-xs font-medium text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full">
+                        {ROLE_OPTIONS.find(r => r.value === group.default_role)?.label || group.default_role}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
+                    )}
                   </td>
                   {/* Créé par */}
                   <td className="px-4 py-3 text-xs text-gray-400">{group.created_by || "—"}</td>

@@ -207,6 +207,12 @@ const Icon = {
       <path d="M16 3.13a4 4 0 010 7.75"/>
     </svg>
   ),
+  Email: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2"/>
+      <path d="M22 4l-10 8L2 4"/>
+    </svg>
+  ),
   // Dockerfile : logo Docker simplifié (cube)
   Dockerfile: () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
@@ -320,6 +326,7 @@ const PAGE_TITLES = {
   "/setup":         { label: "Configuration client",icon: "ClientSetup"  },
   "/users":         { label: "Utilisateurs",        icon: "Users"        },
   "/settings":      { label: "Paramètres",          icon: "Settings"     },
+  "/templates":     { label: "Templates email",     icon: "Email"        },
   "/downloads":     { label: "Téléchargements",     icon: "Download"     },
   "/supervision":   { label: "Supervision",         icon: "Health"       },
   "/logs":          { label: "Logs système",        icon: "Logs"         },
@@ -798,7 +805,7 @@ export default function DashboardLayout() {
           </NavGroup>
 
           {/* ── Groupe Administration ── */}
-          <NavGroup label="Administration" paths={["/downloads","/supervision","/logs","/users","/groups","/roles","/settings"]} collapsed={collapsed}>
+          <NavGroup label="Administration" paths={["/downloads","/supervision","/logs","/users","/groups","/roles","/settings","/templates"]} collapsed={collapsed}>
             <NavItem to="/downloads"   icon={<Icon.Download />} label="Téléchargements"   perm="nav_downloads" collapsed={collapsed} />
             <NavItem to="/supervision" icon={<Icon.Health />}   label="Supervision"       perm="nav_health"    collapsed={collapsed} />
             <NavItem to="/logs"        icon={<Icon.Logs />}     label="Logs système"      perm="nav_settings"  collapsed={collapsed} />
@@ -806,6 +813,7 @@ export default function DashboardLayout() {
             <NavItem to="/groups"      icon={<Icon.Group />}    label="Groupes"           perm="nav_users"     collapsed={collapsed} />
             <NavItem to="/roles"       icon={<Icon.Shield />}   label="Rôles"             perm="nav_users"     collapsed={collapsed} />
             <NavItem to="/settings"    icon={<Icon.Settings />} label="Paramètres"        perm="nav_settings"  collapsed={collapsed} />
+            <NavItem to="/templates"   icon={<Icon.Email />}    label="Templates email"   perm="nav_settings"  collapsed={collapsed} />
           </NavGroup>
         </nav>
 

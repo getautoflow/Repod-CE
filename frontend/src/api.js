@@ -450,3 +450,19 @@ export const getRolePermissions = (id) =>
 
 export const setRolePermissions = (id, permissions) =>
   api.put(`/roles/${encodeURIComponent(id)}/permissions`, { permissions }).then((r) => r.data);
+
+// ── Email Templates ─────────────────────────────────────────────────────────
+export const listEmailTemplates = () =>
+  api.get("/templates").then((r) => r.data.templates);
+
+export const getEmailTemplate = (name) =>
+  api.get(`/templates/${name}`).then((r) => r.data.template);
+
+export const updateEmailTemplate = (name, body, subject) =>
+  api.put(`/templates/${name}`, { body, subject }).then((r) => r.data.template);
+
+export const resetEmailTemplate = (name) =>
+  api.post(`/templates/${name}/reset`).then((r) => r.data.template);
+
+export const previewEmailTemplate = (name, body) =>
+  api.post(`/templates/${name}/preview`, { body }).then((r) => r.data.html);

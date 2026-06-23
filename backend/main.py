@@ -37,6 +37,7 @@ from routers.setup_router import router as setup_router
 from routers.logs_router import router as logs_router
 from routers.groups_router import router as groups_router
 from routers.roles_router import router as roles_router
+from routers.templates_router import router as templates_router
 from auth.roles import seed_builtin_roles
 from services import scheduler_state
 from services import leader_election
@@ -471,3 +472,4 @@ app.include_router(setup_router,          prefix=API_V1)
 app.include_router(logs_router,           prefix=API_V1)
 app.include_router(groups_router,         prefix=API_V1)
 app.include_router(roles_router,          prefix=API_V1)
+app.include_router(templates_router,     prefix=API_V1)
